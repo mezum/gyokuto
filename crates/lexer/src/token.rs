@@ -76,6 +76,101 @@ pub enum Token {
     /// 予約語。識別子としては使えない
     #[token("yield")]
     Yield,
+
+    #[token("+")]
+    Plus,
+    #[token("-")]
+    Minus,
+    #[token("*")]
+    Star,
+    #[token("/")]
+    Slash,
+    #[token("%")]
+    Percent,
+    #[token("&")]
+    Amp,
+    #[token("|")]
+    Pipe,
+    #[token("^")]
+    Caret,
+    #[token("!")]
+    Bang,
+    #[token("<<")]
+    Shl,
+    #[token(">>")]
+    Shr,
+    #[token("&&")]
+    AndAnd,
+    #[token("||")]
+    OrOr,
+    #[token("==")]
+    EqEq,
+    #[token("!=")]
+    Ne,
+    #[token("<")]
+    Lt,
+    #[token(">")]
+    Gt,
+    #[token("<=")]
+    Le,
+    #[token(">=")]
+    Ge,
+    #[token("=")]
+    Eq,
+    #[token("+=")]
+    PlusEq,
+    #[token("-=")]
+    MinusEq,
+    #[token("*=")]
+    StarEq,
+    #[token("/=")]
+    SlashEq,
+    #[token("%=")]
+    PercentEq,
+    #[token("&=")]
+    AmpEq,
+    #[token("|=")]
+    PipeEq,
+    #[token("^=")]
+    CaretEq,
+    #[token("<<=")]
+    ShlEq,
+    #[token(">>=")]
+    ShrEq,
+    #[token(".")]
+    Dot,
+    #[token("..")]
+    DotDot,
+    #[token("..=")]
+    DotDotEq,
+    #[token("::")]
+    ColonColon,
+    #[token(":")]
+    Colon,
+    #[token(";")]
+    Semi,
+    #[token(",")]
+    Comma,
+    #[token("->")]
+    Arrow,
+    #[token("=>")]
+    FatArrow,
+    #[token("?")]
+    Question,
+    #[token("#")]
+    Pound,
+    #[token("(")]
+    LParen,
+    #[token(")")]
+    RParen,
+    #[token("[")]
+    LBracket,
+    #[token("]")]
+    RBracket,
+    #[token("{")]
+    LBrace,
+    #[token("}")]
+    RBrace,
 }
 
 #[cfg(test)]
@@ -167,9 +262,96 @@ mod tests {
             lex("r#foo"),
             [
                 (Ok(Token::Ident), 0..1),
-                (Err(()), 1..2),
+                (Ok(Token::Pound), 1..2),
                 (Ok(Token::Ident), 2..5)
             ]
         );
+    }
+
+    #[test]
+    fn punctuation() {
+        let table = [
+            ("+", Token::Plus),
+            ("-", Token::Minus),
+            ("*", Token::Star),
+            ("/", Token::Slash),
+            ("%", Token::Percent),
+            ("&", Token::Amp),
+            ("|", Token::Pipe),
+            ("^", Token::Caret),
+            ("!", Token::Bang),
+            ("<<", Token::Shl),
+            (">>", Token::Shr),
+            ("&&", Token::AndAnd),
+            ("||", Token::OrOr),
+            ("==", Token::EqEq),
+            ("!=", Token::Ne),
+            ("<", Token::Lt),
+            (">", Token::Gt),
+            ("<=", Token::Le),
+            (">=", Token::Ge),
+            ("=", Token::Eq),
+            ("+=", Token::PlusEq),
+            ("-=", Token::MinusEq),
+            ("*=", Token::StarEq),
+            ("/=", Token::SlashEq),
+            ("%=", Token::PercentEq),
+            ("&=", Token::AmpEq),
+            ("|=", Token::PipeEq),
+            ("^=", Token::CaretEq),
+            ("<<=", Token::ShlEq),
+            (">>=", Token::ShrEq),
+            (".", Token::Dot),
+            ("..", Token::DotDot),
+            ("..=", Token::DotDotEq),
+            ("::", Token::ColonColon),
+            (":", Token::Colon),
+            (";", Token::Semi),
+            (",", Token::Comma),
+            ("->", Token::Arrow),
+            ("=>", Token::FatArrow),
+            ("?", Token::Question),
+            ("#", Token::Pound),
+            ("(", Token::LParen),
+            (")", Token::RParen),
+            ("[", Token::LBracket),
+            ("]", Token::RBracket),
+            ("{", Token::LBrace),
+            ("}", Token::RBrace),
+        ];
+        for (src, token) in table {
+            assert_eq!(lex(src), [(Ok(token), 0..src.len())], "{src}");
+        }
+    }
+
+    #[test]
+    fn longest_match() {
+        assert_eq!(
+            lex("a<<=b"),
+            [
+                (Ok(Token::Ident), 0..1),
+                (Ok(Token::ShlEq), 1..4),
+                (Ok(Token::Ident), 4..5)
+            ]
+        );
+        assert_eq!(
+            lex("T>>"),
+            [(Ok(Token::Ident), 0..1), (Ok(Token::Shr), 1..3)]
+        );
+        assert_eq!(
+            lex("..."),
+            [(Ok(Token::DotDot), 0..2), (Ok(Token::Dot), 2..3)]
+        );
+        assert_eq!(
+            lex("#!"),
+            [(Ok(Token::Pound), 0..1), (Ok(Token::Bang), 1..2)]
+        );
+    }
+
+    #[test]
+    fn unsupported_symbols_are_errors() {
+        for src in ["@", "$", "~"] {
+            assert_eq!(lex(src), [(Err(()), 0..1)], "{src}");
+        }
     }
 }
