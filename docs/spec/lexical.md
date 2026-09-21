@@ -24,18 +24,42 @@
 
 以下はキーワードであり、識別子として使えない。
 
-```text
-as       break    comptime const    continue crate    dyn      else
-enum     false    fn       for      if       impl     in       let
-loop     match    move     mut      pub      return   self     Self
-struct   super    trait    true     type     use      where    while
-```
+- `as`
+- `break`
+- `comptime`
+- `const`
+- `continue`
+- `crate`
+- `dyn`
+- `else`
+- `enum`
+- `false`
+- `fn`
+- `for`
+- `if`
+- `impl`
+- `in`
+- `let`
+- `loop`
+- `match`
+- `move`
+- `mut`
+- `pub`
+- `return`
+- `self`
+- `Self`
+- `struct`
+- `super`
+- `trait`
+- `true`
+- `type`
+- `use`
+- `where`
+- `while`
 
 以下は将来の拡張のために予約されており、識別子として使えない。
 
-```text
-yield
-```
+- `yield`
 
 ## `_` トークン
 
