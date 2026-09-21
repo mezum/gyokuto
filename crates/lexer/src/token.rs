@@ -2,11 +2,29 @@ use logos::Logos;
 
 #[derive(Logos, Debug, Clone, Copy, PartialEq, Eq)]
 #[logos(skip r"\p{Pattern_White_Space}+")]
+#[logos(subpattern dec = r"[0-9][0-9_]*")]
+#[logos(subpattern hex = r"0x[0-9a-fA-F_]*[0-9a-fA-F][0-9a-fA-F_]*")]
+#[logos(subpattern oct = r"0o[0-7_]*[0-7][0-7_]*")]
+#[logos(subpattern bin = r"0b[01_]*[01][01_]*")]
+#[logos(subpattern exp = r"[eE][+-]?[0-9_]*[0-9][0-9_]*")]
+#[logos(subpattern float_suffix = r"f32|f64")]
 pub enum Token {
     #[regex(r"[\p{XID_Start}_]\p{XID_Continue}*")]
     Ident,
     #[token("_", priority = 3)]
     Underscore,
+
+    #[regex(r"((?&dec)|(?&hex)|(?&oct)|(?&bin))(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?")]
+    /// 数値リテラルの直後に無効なサフィックスが続く場合はエラーとする
+    #[regex(
+        r"((?&dec)(\.(?&dec))?|(?&hex)|(?&oct)|(?&bin))\p{XID_Continue}+",
+        |_| false,
+        priority = 0
+    )]
+    Int,
+    #[regex(r"(?&dec)(\.(?&dec)(?&exp)?|(?&exp))(?&float_suffix)?")]
+    #[regex(r"(?&dec)(?&float_suffix)")]
+    Float,
 
     #[token("as")]
     As,
