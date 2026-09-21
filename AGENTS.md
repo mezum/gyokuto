@@ -26,6 +26,8 @@
 - 1 PR の差分行数は原則最大でも 250 行程度に収める
   - 超えそうな場合は PR を分割する
 - clippy の警告は原則対応する、suppress は控える
+- 単一モジュールのテストは、そのモジュールのソース内に `#[cfg(test)] mod tests` として書く
+  - `tests` ディレクトリは複数モジュールや crate をまたぐ結合テスト以上に限定する
 - ライブラリは原則 [ルートの Cargo.toml](root-cargo.toml) に `workspace.dependency` として追加
 
 ## Boundary
