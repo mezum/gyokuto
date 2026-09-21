@@ -2,6 +2,9 @@ use logos::{Lexer, Logos};
 
 #[derive(Logos, Debug, Clone, Copy, PartialEq, Eq)]
 #[logos(skip r"\p{Pattern_White_Space}+")]
+// 行コメントは LF の直前まで読むのが仕様どおりなので、貪欲な繰り返しを許可する
+#[logos(skip(r"//[^\n]*", allow_greedy = true))]
+#[logos(skip(r"/\*", callback = block_comment))]
 #[logos(subpattern dec = r"[0-9][0-9_]*")]
 #[logos(subpattern hex = r"0x[0-9a-fA-F_]*[0-9a-fA-F][0-9a-fA-F_]*")]
 #[logos(subpattern oct = r"0o[0-7_]*[0-7][0-7_]*")]
@@ -254,6 +257,28 @@ fn raw_string(lex: &mut Lexer<Token>) -> bool {
         .sum();
     lex.bump(end + terminator.len() + suffix_len);
     hashes <= 255 && !has_bare_cr && suffix_len == 0
+}
+
+/// ブロックコメントを、ネストの深さを数えて対応する `*/` まで読み飛ばす
+///
+/// ネストの対応は正規表現で表現できないため、開始部分以降をここで扱う
+fn block_comment(lex: &mut Lexer<Token>) -> Result<(), ()> {
+    let remainder = lex.remainder().as_bytes();
+    let mut depth = 1;
+    let mut i = 0;
+    while depth > 0 {
+        match remainder.get(i..i + 2) {
+            Some(b"/*") => (depth, i) = (depth + 1, i + 2),
+            Some(b"*/") => (depth, i) = (depth - 1, i + 2),
+            Some(_) => i += 1,
+            None => {
+                lex.bump(remainder.len());
+                return Err(());
+            }
+        }
+    }
+    lex.bump(i);
+    Ok(())
 }
 
 #[cfg(test)]
