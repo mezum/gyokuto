@@ -17,7 +17,7 @@ pub enum Token {
     #[regex(r"((?&dec)|(?&hex)|(?&oct)|(?&bin))(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?")]
     /// 数値リテラルの直後に無効なサフィックスが続く場合はエラーとする
     #[regex(
-        r"((?&dec)(\.(?&dec))?|(?&hex)|(?&oct)|(?&bin))\p{XID_Continue}+",
+        r"((?&dec)(\.(?&dec))?(?&exp)?|(?&hex)|(?&oct)|(?&bin))\p{XID_Continue}+",
         |_| false,
         priority = 0
     )]
@@ -442,7 +442,9 @@ mod tests {
 
     #[test]
     fn invalid_suffix_is_error() {
-        for src in ["1u7", "1abc", "0b12", "0x", "1e", "0o8", "1.0x", "1f16"] {
+        for src in [
+            "1u7", "1abc", "0b12", "0x", "1e", "0o8", "1.0x", "1f16", "1e+5abc", "2.5E-3u8",
+        ] {
             assert_eq!(lex(src), [(Err(()), 0..src.len())], "{src}");
         }
     }
