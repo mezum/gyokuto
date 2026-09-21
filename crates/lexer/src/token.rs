@@ -698,4 +698,48 @@ mod tests {
             [(Ok(Token::RawStr), 0..6), (Ok(Token::Ident), 7..8)]
         );
     }
+
+    #[test]
+    fn comments_are_skipped() {
+        for src in [
+            "a // x\nb",
+            "a // x\r\nb",
+            "a /* x */ b",
+            "a/*x*/b",
+            "a /* x /* y */ z */ b",
+            "a /**/ b",
+            "a /*/ */ b",
+            "a /// x\nb",
+            "a //! x\nb",
+            "a /** x */ b",
+            "a /*! x */ b",
+        ] {
+            let b = src.len() - 1;
+            assert_eq!(
+                lex(src),
+                [(Ok(Token::Ident), 0..1), (Ok(Token::Ident), b..b + 1)],
+                "{src:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn line_comment_until_end_of_input() {
+        assert_eq!(lex("a // x"), [(Ok(Token::Ident), 0..1)]);
+    }
+
+    #[test]
+    fn unterminated_block_comment_is_error() {
+        assert_eq!(lex("a /* x"), [(Ok(Token::Ident), 0..1), (Err(()), 2..6)]);
+        assert_eq!(lex("/* /* */"), [(Err(()), 0..8)]);
+    }
+
+    #[test]
+    fn comment_markers_in_other_contexts() {
+        assert_eq!(lex(r#""// x""#), [(Ok(Token::Str), 0..6)]);
+        assert_eq!(
+            lex("*/"),
+            [(Ok(Token::Star), 0..1), (Ok(Token::Slash), 1..2)]
+        );
+    }
 }
