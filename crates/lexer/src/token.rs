@@ -626,4 +626,51 @@ mod tests {
             [(Ok(Token::Ident), 0..1), (Ok(Token::Char), 2..5)]
         );
     }
+
+    #[test]
+    fn raw_string_literals() {
+        let max_hashes = format!("r{0}\"a\"{0}", "#".repeat(255));
+        for src in [
+            r#"r"""#,
+            r#"r"abc""#,
+            r#"r"\n""#,
+            r#"r"C:\path\""#,
+            r###"r#"a"b"#"###,
+            r###"r##"a"#b"##"###,
+            "r\"a\r\nb\"",
+            &max_hashes,
+        ] {
+            assert_eq!(lex(src), [(Ok(Token::RawStr), 0..src.len())], "{src:?}");
+        }
+    }
+
+    #[test]
+    fn raw_byte_string_literals() {
+        for src in [r#"br"""#, r#"br"あ\x""#, r###"br#"a"b"#"###] {
+            assert_eq!(lex(src), [(Ok(Token::RawByteStr), 0..src.len())], "{src:?}");
+        }
+    }
+
+    #[test]
+    fn invalid_raw_string_literals() {
+        let too_many_hashes = format!("r{0}\"a\"{0}", "#".repeat(256));
+        for src in [
+            r#"r"abc"#,
+            r###"r#"abc""###,
+            "r\"a\rb\"",
+            r#"r"a"x"#,
+            r#"br"a"x"#,
+            &too_many_hashes,
+        ] {
+            assert_eq!(lex(src), [(Err(()), 0..src.len())], "{src:?}");
+        }
+    }
+
+    #[test]
+    fn lexing_continues_after_raw_string() {
+        assert_eq!(
+            lex(r###"r#"a"# x"###),
+            [(Ok(Token::RawStr), 0..6), (Ok(Token::Ident), 7..8)]
+        );
+    }
 }
