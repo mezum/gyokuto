@@ -46,6 +46,10 @@ pub enum Token {
     /// 閉じていない・不正な内容・直後に識別子の文字が続くバイト文字列リテラルはエラーとする
     #[regex(r#"b"([^"\\]|\\(.|\n))*("\p{XID_Continue}*)?"#, |_| false, priority = 0)]
     ByteStr,
+    #[regex(r##"r#*""##, raw_string)]
+    RawStr,
+    #[regex(r##"br#*""##, raw_string)]
+    RawByteStr,
 
     #[token("as")]
     As,
@@ -229,6 +233,27 @@ fn unicode_escapes_are_valid(lex: &mut Lexer<Token>) -> bool {
                 .and_then(char::from_u32)
                 .is_some()
         })
+}
+
+/// raw 文字列を、開始と同じ数の `#` が `"` の後に続く終端まで読み進める
+///
+/// `#` の数をそろえる処理は正規表現で表現できないため、開始部分以降をここで扱う
+fn raw_string(lex: &mut Lexer<Token>) -> bool {
+    let hashes = lex.slice().matches('#').count();
+    let terminator = format!("\"{}", "#".repeat(hashes));
+    let remainder = lex.remainder();
+    let Some(end) = remainder.find(&terminator) else {
+        lex.bump(remainder.len());
+        return false;
+    };
+    let has_bare_cr = remainder[..end].replace("\r\n", "").contains('\r');
+    let suffix_len: usize = remainder[end + terminator.len()..]
+        .chars()
+        .take_while(|&c| unicode_ident::is_xid_continue(c))
+        .map(char::len_utf8)
+        .sum();
+    lex.bump(end + terminator.len() + suffix_len);
+    hashes <= 255 && !has_bare_cr && suffix_len == 0
 }
 
 #[cfg(test)]

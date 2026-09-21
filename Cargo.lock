@@ -106,6 +106,7 @@ name = "typed-vm-lexer"
 version = "0.1.0"
 dependencies = [
  "logos",
+ "unicode-ident",
 ]
 
 [[package]]
