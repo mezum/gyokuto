@@ -1,4 +1,4 @@
-use logos::Logos;
+use logos::{Lexer, Logos};
 
 #[derive(Logos, Debug, Clone, Copy, PartialEq, Eq)]
 #[logos(skip r"\p{Pattern_White_Space}+")]
@@ -8,6 +8,7 @@ use logos::Logos;
 #[logos(subpattern bin = r"0b[01_]*[01][01_]*")]
 #[logos(subpattern exp = r"[eE][+-]?[0-9_]*[0-9][0-9_]*")]
 #[logos(subpattern float_suffix = r"f32|f64")]
+#[logos(subpattern esc = r#"\\([nrt\\0'"]|x[0-7][0-9a-fA-F]|u\{_*([0-9a-fA-F]_*){1,6}\})"#)]
 pub enum Token {
     #[regex(r"[\p{XID_Start}_]\p{XID_Continue}*")]
     Ident,
@@ -25,6 +26,14 @@ pub enum Token {
     #[regex(r"(?&dec)(\.(?&dec)(?&exp)?|(?&exp))(?&float_suffix)?")]
     #[regex(r"(?&dec)(?&float_suffix)")]
     Float,
+    #[regex(r"'([^'\\\n\r\t]|(?&esc))'", unicode_escapes_are_valid)]
+    /// 閉じていない・不正な内容・直後に識別子の文字が続く文字リテラルはエラーとする
+    #[regex(r"'([^\\\n]|\\.)?([^'\\\n]|\\.)*'?\p{XID_Continue}*", |_| false, priority = 0)]
+    Char,
+    #[regex(r#""([^"\\\r]|\r\n|(?&esc)|\\\r?\n)*""#, unicode_escapes_are_valid)]
+    /// 閉じていない・不正な内容・直後に識別子の文字が続く文字列リテラルはエラーとする
+    #[regex(r#""([^"\\]|\\(.|\n))*("\p{XID_Continue}*)?"#, |_| false, priority = 0)]
+    Str,
 
     #[token("as")]
     As,
@@ -189,6 +198,25 @@ pub enum Token {
     LBrace,
     #[token("}")]
     RBrace,
+}
+
+/// `\u{...}` の値が Unicode スカラー値であるか検査する
+fn unicode_escapes_are_valid(lex: &mut Lexer<Token>) -> bool {
+    // 先に `\\` で分割し、エスケープされた `\` の後の `u{` を誤検出しないようにする
+    lex.slice()
+        .split(r"\\")
+        .flat_map(|s| s.split(r"\u{").skip(1))
+        .all(|s| {
+            let hex: String = s
+                .chars()
+                .take_while(|&c| c != '}')
+                .filter(|&c| c != '_')
+                .collect();
+            u32::from_str_radix(&hex, 16)
+                .ok()
+                .and_then(char::from_u32)
+                .is_some()
+        })
 }
 
 #[cfg(test)]
