@@ -72,7 +72,11 @@ fn keywords() {
 fn unknown_char_is_error_and_lexing_continues() {
     assert_eq!(
         lex("a $ b"),
-        [(Ok(Token::Ident), 0..1), (Err(()), 2..3), (Ok(Token::Ident), 4..5)]
+        [
+            (Ok(Token::Ident), 0..1),
+            (Err(()), 2..3),
+            (Ok(Token::Ident), 4..5)
+        ]
     );
 }
 
@@ -80,6 +84,10 @@ fn unknown_char_is_error_and_lexing_continues() {
 fn raw_identifier_is_not_supported() {
     assert_eq!(
         lex("r#foo"),
-        [(Ok(Token::Ident), 0..1), (Err(()), 1..2), (Ok(Token::Ident), 2..5)]
+        [
+            (Ok(Token::Ident), 0..1),
+            (Err(()), 1..2),
+            (Ok(Token::Ident), 2..5)
+        ]
     );
 }
