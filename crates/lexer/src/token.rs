@@ -9,6 +9,7 @@ use logos::{Lexer, Logos};
 #[logos(subpattern exp = r"[eE][+-]?[0-9_]*[0-9][0-9_]*")]
 #[logos(subpattern float_suffix = r"f32|f64")]
 #[logos(subpattern esc = r#"\\([nrt\\0'"]|x[0-7][0-9a-fA-F]|u\{_*([0-9a-fA-F]_*){1,6}\})"#)]
+#[logos(subpattern byte_esc = r#"\\([nrt\\0'"]|x[0-9a-fA-F]{2})"#)]
 pub enum Token {
     #[regex(r"[\p{XID_Start}_]\p{XID_Continue}*")]
     Ident,
@@ -34,6 +35,17 @@ pub enum Token {
     /// 閉じていない・不正な内容・直後に識別子の文字が続く文字列リテラルはエラーとする
     #[regex(r#""([^"\\]|\\(.|\n))*("\p{XID_Continue}*)?"#, |_| false, priority = 0)]
     Str,
+    #[regex(r"b'([\x00-\x7F&&[^'\\\n\r\t]]|(?&byte_esc))'")]
+    /// 閉じていない・不正な内容・直後に識別子の文字が続くバイト文字リテラルはエラーとする
+    #[regex(r"b'([^\\\n]|\\.)?([^'\\\n]|\\.)*'?\p{XID_Continue}*", |_| false, priority = 0)]
+    Byte,
+    #[regex(
+        r#"b"([^"\\\r]|\r\n|(?&byte_esc)|(?&esc)|\\\r?\n)*""#,
+        unicode_escapes_are_valid
+    )]
+    /// 閉じていない・不正な内容・直後に識別子の文字が続くバイト文字列リテラルはエラーとする
+    #[regex(r#"b"([^"\\]|\\(.|\n))*("\p{XID_Continue}*)?"#, |_| false, priority = 0)]
+    ByteStr,
 
     #[token("as")]
     As,
@@ -551,6 +563,67 @@ mod tests {
         assert_eq!(
             lex(r#""a\qb" x"#),
             [(Err(()), 0..6), (Ok(Token::Ident), 7..8)]
+        );
+    }
+
+    #[test]
+    fn byte_literals() {
+        for src in [
+            "b'a'", "b'\"'", r"b'\n'", r"b'\''", r"b'\\'", r"b'\x7F'", r"b'\xFF'",
+        ] {
+            assert_eq!(lex(src), [(Ok(Token::Byte), 0..src.len())], "{src}");
+        }
+    }
+
+    #[test]
+    fn invalid_byte_literals() {
+        for src in [
+            "b'あ'",
+            r"b'\u{41}'",
+            "b''",
+            "b'ab'",
+            "b'a",
+            "b'a'x",
+            r"b'\x1'",
+        ] {
+            assert_eq!(lex(src), [(Err(()), 0..src.len())], "{src}");
+        }
+    }
+
+    #[test]
+    fn byte_string_literals() {
+        for src in [
+            r#"b"""#,
+            r#"b"abc""#,
+            r#"b"あ""#,
+            r#"b"\xFF""#,
+            r#"b"\u{3042}""#,
+            "b\"line\r\nnext\"",
+            "b\"a\\\n    b\"",
+        ] {
+            assert_eq!(lex(src), [(Ok(Token::ByteStr), 0..src.len())], "{src:?}");
+        }
+    }
+
+    #[test]
+    fn invalid_byte_string_literals() {
+        for src in [
+            r#"b"abc"#,
+            r#"b"\q""#,
+            r#"b"\u{D800}""#,
+            "b\"a\rb\"",
+            r#"b"a"x"#,
+        ] {
+            assert_eq!(lex(src), [(Err(()), 0..src.len())], "{src:?}");
+        }
+    }
+
+    #[test]
+    fn b_alone_is_identifier() {
+        assert_eq!(lex("b"), [(Ok(Token::Ident), 0..1)]);
+        assert_eq!(
+            lex("b 'a'"),
+            [(Ok(Token::Ident), 0..1), (Ok(Token::Char), 2..5)]
         );
     }
 }
