@@ -46,6 +46,10 @@ pub enum Token {
     /// 閉じていない・不正な内容・直後に識別子の文字が続くバイト文字列リテラルはエラーとする
     #[regex(r#"b"([^"\\]|\\(.|\n))*("\p{XID_Continue}*)?"#, |_| false, priority = 0)]
     ByteStr,
+    #[regex(r##"r#*""##, raw_string)]
+    RawStr,
+    #[regex(r##"br#*""##, raw_string)]
+    RawByteStr,
 
     #[token("as")]
     As,
@@ -229,6 +233,27 @@ fn unicode_escapes_are_valid(lex: &mut Lexer<Token>) -> bool {
                 .and_then(char::from_u32)
                 .is_some()
         })
+}
+
+/// raw 文字列を、開始と同じ数の `#` が `"` の後に続く終端まで読み進める
+///
+/// `#` の数をそろえる処理は正規表現で表現できないため、開始部分以降をここで扱う
+fn raw_string(lex: &mut Lexer<Token>) -> bool {
+    let hashes = lex.slice().matches('#').count();
+    let terminator = format!("\"{}", "#".repeat(hashes));
+    let remainder = lex.remainder();
+    let Some(end) = remainder.find(&terminator) else {
+        lex.bump(remainder.len());
+        return false;
+    };
+    let has_bare_cr = remainder[..end].replace("\r\n", "").contains('\r');
+    let suffix_len: usize = remainder[end + terminator.len()..]
+        .chars()
+        .take_while(|&c| unicode_ident::is_xid_continue(c))
+        .map(char::len_utf8)
+        .sum();
+    lex.bump(end + terminator.len() + suffix_len);
+    hashes <= 255 && !has_bare_cr && suffix_len == 0
 }
 
 #[cfg(test)]
@@ -624,6 +649,53 @@ mod tests {
         assert_eq!(
             lex("b 'a'"),
             [(Ok(Token::Ident), 0..1), (Ok(Token::Char), 2..5)]
+        );
+    }
+
+    #[test]
+    fn raw_string_literals() {
+        let max_hashes = format!("r{0}\"a\"{0}", "#".repeat(255));
+        for src in [
+            r#"r"""#,
+            r#"r"abc""#,
+            r#"r"\n""#,
+            r#"r"C:\path\""#,
+            r###"r#"a"b"#"###,
+            r###"r##"a"#b"##"###,
+            "r\"a\r\nb\"",
+            &max_hashes,
+        ] {
+            assert_eq!(lex(src), [(Ok(Token::RawStr), 0..src.len())], "{src:?}");
+        }
+    }
+
+    #[test]
+    fn raw_byte_string_literals() {
+        for src in [r#"br"""#, r#"br"あ\x""#, r###"br#"a"b"#"###] {
+            assert_eq!(lex(src), [(Ok(Token::RawByteStr), 0..src.len())], "{src:?}");
+        }
+    }
+
+    #[test]
+    fn invalid_raw_string_literals() {
+        let too_many_hashes = format!("r{0}\"a\"{0}", "#".repeat(256));
+        for src in [
+            r#"r"abc"#,
+            r###"r#"abc""###,
+            "r\"a\rb\"",
+            r#"r"a"x"#,
+            r#"br"a"x"#,
+            &too_many_hashes,
+        ] {
+            assert_eq!(lex(src), [(Err(()), 0..src.len())], "{src:?}");
+        }
+    }
+
+    #[test]
+    fn lexing_continues_after_raw_string() {
+        assert_eq!(
+            lex(r###"r#"a"# x"###),
+            [(Ok(Token::RawStr), 0..6), (Ok(Token::Ident), 7..8)]
         );
     }
 }

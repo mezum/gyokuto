@@ -10,3 +10,4 @@ license = "MIT OR APACHE-2.0"
 
 [workspace.dependencies]
 logos = "0.16.1"
+unicode-ident = "1.0.26"
