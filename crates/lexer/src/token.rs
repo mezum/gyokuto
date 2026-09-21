@@ -76,6 +76,101 @@ pub enum Token {
     /// 予約語。識別子としては使えない
     #[token("yield")]
     Yield,
+
+    #[token("+")]
+    Plus,
+    #[token("-")]
+    Minus,
+    #[token("*")]
+    Star,
+    #[token("/")]
+    Slash,
+    #[token("%")]
+    Percent,
+    #[token("&")]
+    Amp,
+    #[token("|")]
+    Pipe,
+    #[token("^")]
+    Caret,
+    #[token("!")]
+    Bang,
+    #[token("<<")]
+    Shl,
+    #[token(">>")]
+    Shr,
+    #[token("&&")]
+    AndAnd,
+    #[token("||")]
+    OrOr,
+    #[token("==")]
+    EqEq,
+    #[token("!=")]
+    Ne,
+    #[token("<")]
+    Lt,
+    #[token(">")]
+    Gt,
+    #[token("<=")]
+    Le,
+    #[token(">=")]
+    Ge,
+    #[token("=")]
+    Eq,
+    #[token("+=")]
+    PlusEq,
+    #[token("-=")]
+    MinusEq,
+    #[token("*=")]
+    StarEq,
+    #[token("/=")]
+    SlashEq,
+    #[token("%=")]
+    PercentEq,
+    #[token("&=")]
+    AmpEq,
+    #[token("|=")]
+    PipeEq,
+    #[token("^=")]
+    CaretEq,
+    #[token("<<=")]
+    ShlEq,
+    #[token(">>=")]
+    ShrEq,
+    #[token(".")]
+    Dot,
+    #[token("..")]
+    DotDot,
+    #[token("..=")]
+    DotDotEq,
+    #[token("::")]
+    ColonColon,
+    #[token(":")]
+    Colon,
+    #[token(";")]
+    Semi,
+    #[token(",")]
+    Comma,
+    #[token("->")]
+    Arrow,
+    #[token("=>")]
+    FatArrow,
+    #[token("?")]
+    Question,
+    #[token("#")]
+    Pound,
+    #[token("(")]
+    LParen,
+    #[token(")")]
+    RParen,
+    #[token("[")]
+    LBracket,
+    #[token("]")]
+    RBracket,
+    #[token("{")]
+    LBrace,
+    #[token("}")]
+    RBrace,
 }
 
 #[cfg(test)]
@@ -167,7 +262,7 @@ mod tests {
             lex("r#foo"),
             [
                 (Ok(Token::Ident), 0..1),
-                (Err(()), 1..2),
+                (Ok(Token::Pound), 1..2),
                 (Ok(Token::Ident), 2..5)
             ]
         );
