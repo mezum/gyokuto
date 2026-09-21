@@ -16,3 +16,7 @@ test:
 [doc("Clean all build artifacts")]
 clean:
     cargo clean
+
+[doc("Format all code")]
+fmt:
+    cargo fmt
