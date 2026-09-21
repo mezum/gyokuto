@@ -8,3 +8,4 @@ rust-version = "1.98.1"
 license = "MIT OR APACHE-2.0"
 
 [workspace.dependencies]
+logos = "0.16.1"
