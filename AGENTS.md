@@ -29,6 +29,7 @@
 - clippy の警告は原則対応する、suppress は控える
 - 単一モジュールのテストは、そのモジュールのソース内に `#[cfg(test)] mod tests` として書く
   - `tests` ディレクトリは複数モジュールや crate をまたぐ結合テスト以上に限定する
+- `lib.rs` は `mod` / `pub mod` と `pub use` を主とし、実装は書かない
 - ライブラリは原則 [ルートの Cargo.toml](root-cargo.toml) に `workspace.dependency` として追加
 
 ## Boundary
