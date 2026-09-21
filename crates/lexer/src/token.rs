@@ -448,4 +448,81 @@ mod tests {
             assert_eq!(lex(src), [(Err(()), 0..src.len())], "{src}");
         }
     }
+
+    #[test]
+    fn char_literals() {
+        for src in [
+            "'a'",
+            "'あ'",
+            "'\"'",
+            r"'\n'",
+            r"'\''",
+            r"'\'",
+            r"'\0'",
+            r"'\x7F'",
+            r"'\u{1F600}'",
+            r"'\u{10_FFFF}'",
+        ] {
+            assert_eq!(lex(src), [(Ok(Token::Char), 0..src.len())], "{src}");
+        }
+    }
+
+    #[test]
+    fn invalid_char_literals() {
+        for src in [
+            "''",
+            "'ab'",
+            "'a",
+            "'''",
+            "'\t'",
+            r"'\q'",
+            r"'\x80'",
+            r"'\u{110000}'",
+            r"'\u{D800}'",
+            r"'\u{}'",
+            r"'\u{1234567}'",
+            "'a'x",
+        ] {
+            assert_eq!(lex(src), [(Err(()), 0..src.len())], "{src}");
+        }
+    }
+
+    #[test]
+    fn string_literals() {
+        for src in [
+            r#""""#,
+            r#""abc""#,
+            r#""'""#,
+            r#""a\nb""#,
+            r#""\"\\""#,
+            r#""\u{110000}""#,
+            "\"line\nnext\"",
+            "\"line\r\nnext\"",
+            "\"a\\n    b\"",
+            "\"a\\r\n    b\"",
+        ] {
+            assert_eq!(lex(src), [(Ok(Token::Str), 0..src.len())], "{src:?}");
+        }
+    }
+
+    #[test]
+    fn invalid_string_literals() {
+        for src in [
+            r#""abc"#,
+            r#""a\qb""#,
+            "\"a\rb\"",
+            r#""\u{D800}""#,
+            r#""abc"x"#,
+        ] {
+            assert_eq!(lex(src), [(Err(()), 0..src.len())], "{src:?}");
+        }
+    }
+
+    #[test]
+    fn lexing_continues_after_invalid_string() {
+        assert_eq!(
+            lex(r#""a\qb" x"#),
+            [(Err(()), 0..6), (Ok(Token::Ident), 7..8)]
+        );
+    }
 }
