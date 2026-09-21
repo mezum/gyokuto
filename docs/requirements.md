@@ -68,7 +68,7 @@ JIT は持たず、バイトコードインタプリタで実行する。
 
 ## 7. シリアライズ
 
-- serde 連携: スクリプトの値を TypeInfo 経由で `Serialize` / `Deserialize` に橋渡しする
+- (MVP 後) serde 連携: スクリプトの値を TypeInfo 経由で `Serialize` / `Deserialize` に橋渡しする
   - フォーマット (JSON 等) はホストが選ぶ
 - スクリプト内でもリフレクション API を使ってシリアライザを実装できる
 
