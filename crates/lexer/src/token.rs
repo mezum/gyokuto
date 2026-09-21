@@ -553,4 +553,65 @@ mod tests {
             [(Err(()), 0..6), (Ok(Token::Ident), 7..8)]
         );
     }
+
+    #[test]
+    fn byte_literals() {
+        for src in [
+            "b'a'", "b'\"'", r"b'\n'", r"b'\''", r"b'\\'", r"b'\x7F'", r"b'\xFF'",
+        ] {
+            assert_eq!(lex(src), [(Ok(Token::Byte), 0..src.len())], "{src}");
+        }
+    }
+
+    #[test]
+    fn invalid_byte_literals() {
+        for src in [
+            "b'あ'",
+            r"b'\u{41}'",
+            "b''",
+            "b'ab'",
+            "b'a",
+            "b'a'x",
+            r"b'\x1'",
+        ] {
+            assert_eq!(lex(src), [(Err(()), 0..src.len())], "{src}");
+        }
+    }
+
+    #[test]
+    fn byte_string_literals() {
+        for src in [
+            r#"b"""#,
+            r#"b"abc""#,
+            r#"b"あ""#,
+            r#"b"\xFF""#,
+            r#"b"\u{3042}""#,
+            "b\"line\r\nnext\"",
+            "b\"a\\\n    b\"",
+        ] {
+            assert_eq!(lex(src), [(Ok(Token::ByteStr), 0..src.len())], "{src:?}");
+        }
+    }
+
+    #[test]
+    fn invalid_byte_string_literals() {
+        for src in [
+            r#"b"abc"#,
+            r#"b"\q""#,
+            r#"b"\u{D800}""#,
+            "b\"a\rb\"",
+            r#"b"a"x"#,
+        ] {
+            assert_eq!(lex(src), [(Err(()), 0..src.len())], "{src:?}");
+        }
+    }
+
+    #[test]
+    fn b_alone_is_identifier() {
+        assert_eq!(lex("b"), [(Ok(Token::Ident), 0..1)]);
+        assert_eq!(
+            lex("b 'a'"),
+            [(Ok(Token::Ident), 0..1), (Ok(Token::Char), 2..5)]
+        );
+    }
 }
