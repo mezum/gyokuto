@@ -354,4 +354,78 @@ mod tests {
             assert_eq!(lex(src), [(Err(()), 0..1)], "{src}");
         }
     }
+
+    #[test]
+    fn integer_literals() {
+        for src in [
+            "0",
+            "123",
+            "1_000",
+            "1_",
+            "0xff",
+            "0xFF_FF",
+            "0x1f32",
+            "0o17",
+            "0b1010",
+            "1u8",
+            "1i64",
+            "0xffusize",
+            "0b1_u32",
+        ] {
+            assert_eq!(lex(src), [(Ok(Token::Int), 0..src.len())], "{src}");
+        }
+    }
+
+    #[test]
+    fn float_literals() {
+        for src in [
+            "1.0", "0.5", "1_000.5", "1e10", "2.5E-3", "1e+5", "1.0f32", "1f64", "1e10f32",
+        ] {
+            assert_eq!(lex(src), [(Ok(Token::Float), 0..src.len())], "{src}");
+        }
+    }
+
+    #[test]
+    fn number_followed_by_dot() {
+        assert_eq!(lex("1."), [(Ok(Token::Int), 0..1), (Ok(Token::Dot), 1..2)]);
+        assert_eq!(
+            lex("1..2"),
+            [
+                (Ok(Token::Int), 0..1),
+                (Ok(Token::DotDot), 1..3),
+                (Ok(Token::Int), 3..4)
+            ]
+        );
+        assert_eq!(
+            lex("1.abs"),
+            [
+                (Ok(Token::Int), 0..1),
+                (Ok(Token::Dot), 1..2),
+                (Ok(Token::Ident), 2..5)
+            ]
+        );
+        assert_eq!(
+            lex("t.0.1"),
+            [
+                (Ok(Token::Ident), 0..1),
+                (Ok(Token::Dot), 1..2),
+                (Ok(Token::Float), 2..5)
+            ]
+        );
+    }
+
+    #[test]
+    fn minus_is_not_part_of_literal() {
+        assert_eq!(
+            lex("-1"),
+            [(Ok(Token::Minus), 0..1), (Ok(Token::Int), 1..2)]
+        );
+    }
+
+    #[test]
+    fn invalid_suffix_is_error() {
+        for src in ["1u7", "1abc", "0b12", "0x", "1e", "0o8", "1.0x", "1f16"] {
+            assert_eq!(lex(src), [(Err(()), 0..src.len())], "{src}");
+        }
+    }
 }
