@@ -2,11 +2,29 @@ use logos::Logos;
 
 #[derive(Logos, Debug, Clone, Copy, PartialEq, Eq)]
 #[logos(skip r"\p{Pattern_White_Space}+")]
+#[logos(subpattern dec = r"[0-9][0-9_]*")]
+#[logos(subpattern hex = r"0x[0-9a-fA-F_]*[0-9a-fA-F][0-9a-fA-F_]*")]
+#[logos(subpattern oct = r"0o[0-7_]*[0-7][0-7_]*")]
+#[logos(subpattern bin = r"0b[01_]*[01][01_]*")]
+#[logos(subpattern exp = r"[eE][+-]?[0-9_]*[0-9][0-9_]*")]
+#[logos(subpattern float_suffix = r"f32|f64")]
 pub enum Token {
     #[regex(r"[\p{XID_Start}_]\p{XID_Continue}*")]
     Ident,
     #[token("_", priority = 3)]
     Underscore,
+
+    #[regex(r"((?&dec)|(?&hex)|(?&oct)|(?&bin))(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?")]
+    /// 数値リテラルの直後に無効なサフィックスが続く場合はエラーとする
+    #[regex(
+        r"((?&dec)(\.(?&dec))?(?&exp)?|(?&hex)|(?&oct)|(?&bin))\p{XID_Continue}+",
+        |_| false,
+        priority = 0
+    )]
+    Int,
+    #[regex(r"(?&dec)(\.(?&dec)(?&exp)?|(?&exp))(?&float_suffix)?")]
+    #[regex(r"(?&dec)(?&float_suffix)")]
+    Float,
 
     #[token("as")]
     As,
@@ -352,6 +370,82 @@ mod tests {
     fn unsupported_symbols_are_errors() {
         for src in ["@", "$", "~"] {
             assert_eq!(lex(src), [(Err(()), 0..1)], "{src}");
+        }
+    }
+
+    #[test]
+    fn integer_literals() {
+        for src in [
+            "0",
+            "123",
+            "1_000",
+            "1_",
+            "0xff",
+            "0xFF_FF",
+            "0x1f32",
+            "0o17",
+            "0b1010",
+            "1u8",
+            "1i64",
+            "0xffusize",
+            "0b1_u32",
+        ] {
+            assert_eq!(lex(src), [(Ok(Token::Int), 0..src.len())], "{src}");
+        }
+    }
+
+    #[test]
+    fn float_literals() {
+        for src in [
+            "1.0", "0.5", "1_000.5", "1e10", "2.5E-3", "1e+5", "1.0f32", "1f64", "1e10f32",
+        ] {
+            assert_eq!(lex(src), [(Ok(Token::Float), 0..src.len())], "{src}");
+        }
+    }
+
+    #[test]
+    fn number_followed_by_dot() {
+        assert_eq!(lex("1."), [(Ok(Token::Int), 0..1), (Ok(Token::Dot), 1..2)]);
+        assert_eq!(
+            lex("1..2"),
+            [
+                (Ok(Token::Int), 0..1),
+                (Ok(Token::DotDot), 1..3),
+                (Ok(Token::Int), 3..4)
+            ]
+        );
+        assert_eq!(
+            lex("1.abs"),
+            [
+                (Ok(Token::Int), 0..1),
+                (Ok(Token::Dot), 1..2),
+                (Ok(Token::Ident), 2..5)
+            ]
+        );
+        assert_eq!(
+            lex("t.0.1"),
+            [
+                (Ok(Token::Ident), 0..1),
+                (Ok(Token::Dot), 1..2),
+                (Ok(Token::Float), 2..5)
+            ]
+        );
+    }
+
+    #[test]
+    fn minus_is_not_part_of_literal() {
+        assert_eq!(
+            lex("-1"),
+            [(Ok(Token::Minus), 0..1), (Ok(Token::Int), 1..2)]
+        );
+    }
+
+    #[test]
+    fn invalid_suffix_is_error() {
+        for src in [
+            "1u7", "1abc", "0b12", "0x", "1e", "0o8", "1.0x", "1f16", "1e+5abc", "2.5E-3u8",
+        ] {
+            assert_eq!(lex(src), [(Err(()), 0..src.len())], "{src}");
         }
     }
 }
