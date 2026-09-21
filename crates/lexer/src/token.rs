@@ -9,6 +9,7 @@ use logos::{Lexer, Logos};
 #[logos(subpattern exp = r"[eE][+-]?[0-9_]*[0-9][0-9_]*")]
 #[logos(subpattern float_suffix = r"f32|f64")]
 #[logos(subpattern esc = r#"\\([nrt\\0'"]|x[0-7][0-9a-fA-F]|u\{_*([0-9a-fA-F]_*){1,6}\})"#)]
+#[logos(subpattern byte_esc = r#"\\([nrt\\0'"]|x[0-9a-fA-F]{2})"#)]
 pub enum Token {
     #[regex(r"[\p{XID_Start}_]\p{XID_Continue}*")]
     Ident,
@@ -34,6 +35,17 @@ pub enum Token {
     /// 閉じていない・不正な内容・直後に識別子の文字が続く文字列リテラルはエラーとする
     #[regex(r#""([^"\\]|\\(.|\n))*("\p{XID_Continue}*)?"#, |_| false, priority = 0)]
     Str,
+    #[regex(r"b'([\x00-\x7F&&[^'\\\n\r\t]]|(?&byte_esc))'")]
+    /// 閉じていない・不正な内容・直後に識別子の文字が続くバイト文字リテラルはエラーとする
+    #[regex(r"b'([^\\\n]|\\.)?([^'\\\n]|\\.)*'?\p{XID_Continue}*", |_| false, priority = 0)]
+    Byte,
+    #[regex(
+        r#"b"([^"\\\r]|\r\n|(?&byte_esc)|(?&esc)|\\\r?\n)*""#,
+        unicode_escapes_are_valid
+    )]
+    /// 閉じていない・不正な内容・直後に識別子の文字が続くバイト文字列リテラルはエラーとする
+    #[regex(r#"b"([^"\\]|\\(.|\n))*("\p{XID_Continue}*)?"#, |_| false, priority = 0)]
+    ByteStr,
 
     #[token("as")]
     As,
