@@ -503,6 +503,7 @@ mod tests {
     use crate::error::{ErrorKind, Expected, Found, LiteralError};
     use crate::sexpr::AsSexpr;
     use gyokuto_lexer::LexError;
+    use rstest::rstest;
 
     fn parse_ok(src: &str) -> String {
         let (expr, errors) = parse_expr(src);
@@ -510,10 +511,11 @@ mod tests {
         expr.unwrap().as_sexpr()
     }
 
-    #[test]
-    fn bool_literals() {
-        assert_eq!(parse_ok("true"), "true");
-        assert_eq!(parse_ok("false"), "false");
+    #[rstest]
+    #[case("true", "true")]
+    #[case("false", "false")]
+    fn bool_literal(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
     }
 
     #[test]
@@ -524,11 +526,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn multi_scalar_graphemes_are_not_chars() {
-        for src in ["'e\u{301}'", "'👨\u{200D}👩'", "'🇯🇵'"] {
-            assert!(!parse_expr(src).1.is_empty(), "{src:?}");
-        }
+    #[rstest]
+    #[case("'e\u{301}'")]
+    #[case("'👨\u{200D}👩'")]
+    #[case("'🇯🇵'")]
+    fn multi_scalar_grapheme_is_not_char(#[case] src: &str) {
+        assert!(!parse_expr(src).1.is_empty());
     }
 
     #[test]
@@ -543,34 +546,28 @@ mod tests {
         assert_eq!(expr.unwrap().as_sexpr(), "(array error a)");
     }
 
-    #[test]
-    fn paths() {
-        for src in [
-            "a",
-            "a::b::c",
-            "crate::a",
-            "self",
-            "self::a",
-            "Self::new",
-            "super::a",
-            "super::super::a",
-        ] {
-            assert_eq!(parse_ok(src), src);
-        }
+    #[rstest]
+    #[case("a")]
+    #[case("a::b::c")]
+    #[case("crate::a")]
+    #[case("self")]
+    #[case("self::a")]
+    #[case("Self::new")]
+    #[case("super::a")]
+    #[case("super::super::a")]
+    fn path(#[case] src: &str) {
+        assert_eq!(parse_ok(src), src);
     }
 
-    #[test]
-    fn invalid_paths() {
-        for src in [
-            "a::crate",
-            "a::self",
-            "a::super",
-            "super::a::super",
-            "::a",
-            "a::",
-        ] {
-            assert!(!parse_expr(src).1.is_empty(), "{src}");
-        }
+    #[rstest]
+    #[case("a::crate")]
+    #[case("a::self")]
+    #[case("a::super")]
+    #[case("super::a::super")]
+    #[case("::a")]
+    #[case("a::")]
+    fn invalid_path(#[case] src: &str) {
+        assert!(!parse_expr(src).1.is_empty());
     }
 
     #[test]
@@ -588,38 +585,47 @@ mod tests {
         assert_eq!(expr.unwrap().as_sexpr(), "error");
     }
 
-    #[test]
-    fn parens_and_tuples() {
-        assert_eq!(parse_ok("(a)"), "(paren a)");
-        assert_eq!(parse_ok("()"), "(tuple)");
-        assert_eq!(parse_ok("(a,)"), "(tuple a)");
-        assert_eq!(parse_ok("(a, b)"), "(tuple a b)");
-        assert_eq!(parse_ok("(a, b,)"), "(tuple a b)");
-        assert_eq!(parse_ok("((a))"), "(paren (paren a))");
+    #[rstest]
+    #[case("(a)", "(paren a)")]
+    #[case("()", "(tuple)")]
+    #[case("(a,)", "(tuple a)")]
+    #[case("(a, b)", "(tuple a b)")]
+    #[case("(a, b,)", "(tuple a b)")]
+    #[case("((a))", "(paren (paren a))")]
+    fn paren_or_tuple(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("[]", "(array)")]
+    #[case("[a, b,]", "(array a b)")]
+    #[case("[a; n]", "(repeat a n)")]
+    #[case("[(a, b), [c]]", "(array (tuple a b) (array c))")]
+    fn array(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("(a,,)")]
+    #[case("(,)")]
+    #[case("[a,,]")]
+    #[case("[,]")]
+    #[case("[a; n,]")]
+    #[case("[a, b; n]")]
+    fn invalid_separator(#[case] src: &str) {
+        assert!(!parse_expr(src).1.is_empty());
     }
 
     #[test]
-    fn arrays() {
-        assert_eq!(parse_ok("[]"), "(array)");
-        assert_eq!(parse_ok("[a, b,]"), "(array a b)");
-        assert_eq!(parse_ok("[a; n]"), "(repeat a n)");
-        assert_eq!(parse_ok("[(a, b), [c]]"), "(array (tuple a b) (array c))");
+    fn deeply_nested_parens() {
+        let src = format!("{}a{}", "(".repeat(64), ")".repeat(64));
+        assert!(parse_expr(&src).1.is_empty());
     }
 
     #[test]
-    fn invalid_separators() {
-        for src in ["(a,,)", "(,)", "[a,,]", "[,]", "[a; n,]", "[a, b; n]"] {
-            assert!(!parse_expr(src).1.is_empty(), "{src}");
-        }
-    }
-
-    #[test]
-    fn deeply_nested_delimiters() {
-        let depth = 64;
-        let parens = format!("{}a{}", "(".repeat(depth), ")".repeat(depth));
-        let arrays = format!("{}a{}", "[".repeat(depth), "]".repeat(depth));
-        assert!(parse_expr(&parens).1.is_empty());
-        assert!(parse_expr(&arrays).1.is_empty());
+    fn deeply_nested_arrays() {
+        let src = format!("{}a{}", "[".repeat(64), "]".repeat(64));
+        assert!(parse_expr(&src).1.is_empty());
     }
 
     #[test]
@@ -656,14 +662,19 @@ mod tests {
         assert_eq!(expr.unwrap().as_sexpr(), "(array a error)");
     }
 
+    #[rstest]
+    #[case("-a", "(Neg a)")]
+    #[case("!a", "(Not a)")]
+    #[case("*a", "(Deref a)")]
+    #[case("&a", "(Ref a)")]
+    #[case("&mut a", "(RefMut a)")]
+    #[case("-!*a", "(Neg (Not (Deref a)))")]
+    fn unary_operator(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
     #[test]
-    fn unary_operators() {
-        assert_eq!(parse_ok("-a"), "(Neg a)");
-        assert_eq!(parse_ok("!a"), "(Not a)");
-        assert_eq!(parse_ok("*a"), "(Deref a)");
-        assert_eq!(parse_ok("&a"), "(Ref a)");
-        assert_eq!(parse_ok("&mut a"), "(RefMut a)");
-        assert_eq!(parse_ok("-!*a"), "(Neg (Not (Deref a)))");
+    fn double_ref_is_error() {
         assert!(!parse_expr("&&a").1.is_empty());
     }
 
@@ -675,74 +686,86 @@ mod tests {
         );
     }
 
-    #[test]
-    fn binary_precedence() {
-        for (src, expected) in [
-            ("a * b + c", "(Add (Mul a b) c)"),
-            ("a + b * c", "(Add a (Mul b c))"),
-            ("a + b << c", "(Shl (Add a b) c)"),
-            ("a << b & c", "(BitAnd (Shl a b) c)"),
-            ("a & b ^ c", "(BitXor (BitAnd a b) c)"),
-            ("a ^ b | c", "(BitOr (BitXor a b) c)"),
-            ("a | b == c", "(Eq (BitOr a b) c)"),
-            ("a == b && c", "(And (Eq a b) c)"),
-            ("a && b || c", "(Or (And a b) c)"),
-            ("-a * b", "(Mul (Neg a) b)"),
-            ("(a + b) * c", "(Mul (paren (Add a b)) c)"),
-        ] {
-            assert_eq!(parse_ok(src), expected, "{src}");
-        }
+    #[rstest]
+    #[case("a * b + c", "(Add (Mul a b) c)")]
+    #[case("a + b * c", "(Add a (Mul b c))")]
+    #[case("a + b << c", "(Shl (Add a b) c)")]
+    #[case("a << b & c", "(BitAnd (Shl a b) c)")]
+    #[case("a & b ^ c", "(BitXor (BitAnd a b) c)")]
+    #[case("a ^ b | c", "(BitOr (BitXor a b) c)")]
+    #[case("a | b == c", "(Eq (BitOr a b) c)")]
+    #[case("a == b && c", "(And (Eq a b) c)")]
+    #[case("a && b || c", "(Or (And a b) c)")]
+    #[case("-a * b", "(Mul (Neg a) b)")]
+    #[case("(a + b) * c", "(Mul (paren (Add a b)) c)")]
+    fn binary_precedence(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("a * b", "Mul")]
+    #[case("a / b", "Div")]
+    #[case("a % b", "Rem")]
+    #[case("a + b", "Add")]
+    #[case("a - b", "Sub")]
+    #[case("a << b", "Shl")]
+    #[case("a >> b", "Shr")]
+    #[case("a & b", "BitAnd")]
+    #[case("a ^ b", "BitXor")]
+    #[case("a | b", "BitOr")]
+    #[case("a == b", "Eq")]
+    #[case("a != b", "Ne")]
+    #[case("a < b", "Lt")]
+    #[case("a > b", "Gt")]
+    #[case("a <= b", "Le")]
+    #[case("a >= b", "Ge")]
+    #[case("a && b", "And")]
+    #[case("a || b", "Or")]
+    fn binary_operator(#[case] src: &str, #[case] op: &str) {
+        assert_eq!(parse_ok(src), format!("({op} a b)"));
+    }
+
+    #[rstest]
+    #[case("a - b - c", "(Sub (Sub a b) c)")]
+    #[case("a || b || c", "(Or (Or a b) c)")]
+    fn left_associative(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("a>b", "(Gt a b)")]
+    #[case("a>=b", "(Ge a b)")]
+    #[case("a>>b", "(Shr a b)")]
+    #[case("a>>=b", "(Shr= a b)")]
+    fn operator_starting_with_gt_without_spaces(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
     }
 
     #[test]
-    fn binary_operators() {
-        for (src, op) in [
-            ("a * b", "Mul"),
-            ("a / b", "Div"),
-            ("a % b", "Rem"),
-            ("a + b", "Add"),
-            ("a - b", "Sub"),
-            ("a << b", "Shl"),
-            ("a >> b", "Shr"),
-            ("a & b", "BitAnd"),
-            ("a ^ b", "BitXor"),
-            ("a | b", "BitOr"),
-            ("a == b", "Eq"),
-            ("a != b", "Ne"),
-            ("a < b", "Lt"),
-            ("a > b", "Gt"),
-            ("a <= b", "Le"),
-            ("a >= b", "Ge"),
-            ("a && b", "And"),
-            ("a || b", "Or"),
-        ] {
-            assert_eq!(parse_ok(src), format!("({op} a b)"), "{src}");
-        }
-    }
-
-    #[test]
-    fn left_associative() {
-        assert_eq!(parse_ok("a - b - c"), "(Sub (Sub a b) c)");
-        assert_eq!(parse_ok("a || b || c"), "(Or (Or a b) c)");
-    }
-
-    #[test]
-    fn operators_starting_with_gt_without_spaces() {
-        assert_eq!(parse_ok("a>b"), "(Gt a b)");
-        assert_eq!(parse_ok("a>=b"), "(Ge a b)");
-        assert_eq!(parse_ok("a>>b"), "(Shr a b)");
-        assert_eq!(parse_ok("a>>=b"), "(Shr= a b)");
+    fn glued_operator_span() {
         assert_eq!(parse_expr("a>>b").0.unwrap().span.into_range(), 0..4);
-        for src in ["a > > b", "a > = b", "a >> = b", "a > >= b"] {
-            assert!(!parse_expr(src).1.is_empty(), "{src}");
-        }
+    }
+
+    #[rstest]
+    #[case("a > > b")]
+    #[case("a > = b")]
+    #[case("a >> = b")]
+    #[case("a > >= b")]
+    fn operator_starting_with_gt_with_spaces_is_error(#[case] src: &str) {
+        assert!(!parse_expr(src).1.is_empty());
+    }
+
+    #[rstest]
+    #[case("a < b < c")]
+    #[case("a == b == c")]
+    #[case("a < b == c")]
+    #[case("(a < b > c)")]
+    fn comparison_does_not_chain(#[case] src: &str) {
+        assert!(!parse_expr(src).1.is_empty());
     }
 
     #[test]
-    fn comparisons_do_not_chain() {
-        for src in ["a < b < c", "a == b == c", "a < b == c", "(a < b > c)"] {
-            assert!(!parse_expr(src).1.is_empty(), "{src}");
-        }
+    fn parenthesized_comparison_can_be_compared() {
         assert_eq!(parse_ok("(a < b) == c"), "(Eq (paren (Lt a b)) c)");
     }
 
@@ -757,55 +780,53 @@ mod tests {
         assert_eq!(rhs.span.into_range(), 4..6);
     }
 
-    #[test]
-    fn ranges() {
-        for (src, expected) in [
-            ("a..b", "(.. a b)"),
-            ("a..", "(.. a _)"),
-            ("..b", "(.. _ b)"),
-            ("..", "(.. _ _)"),
-            ("a..=b", "(..= a b)"),
-            ("..=b", "(..= _ b)"),
-            ("a || b..c && d", "(.. (Or a b) (And c d))"),
-            ("(a..)", "(paren (.. a _))"),
-            ("[.., a..]", "(array (.. _ _) (.. a _))"),
-        ] {
-            assert_eq!(parse_ok(src), expected, "{src}");
-        }
+    #[rstest]
+    #[case("a..b", "(.. a b)")]
+    #[case("a..", "(.. a _)")]
+    #[case("..b", "(.. _ b)")]
+    #[case("..", "(.. _ _)")]
+    #[case("a..=b", "(..= a b)")]
+    #[case("..=b", "(..= _ b)")]
+    #[case("a || b..c && d", "(.. (Or a b) (And c d))")]
+    #[case("(a..)", "(paren (.. a _))")]
+    #[case("[.., a..]", "(array (.. _ _) (.. a _))")]
+    fn range(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
     }
 
-    #[test]
-    fn invalid_ranges() {
-        for src in ["a..=", "..=", "a..b..c", "..a..", "(a..=)"] {
-            assert!(!parse_expr(src).1.is_empty(), "{src}");
-        }
+    #[rstest]
+    #[case("a..=")]
+    #[case("..=")]
+    #[case("a..b..c")]
+    #[case("..a..")]
+    #[case("(a..=)")]
+    fn invalid_range(#[case] src: &str) {
+        assert!(!parse_expr(src).1.is_empty());
     }
 
-    #[test]
-    fn assignments() {
-        for (src, op) in [
-            ("a = b", ""),
-            ("a += b", "Add"),
-            ("a -= b", "Sub"),
-            ("a *= b", "Mul"),
-            ("a /= b", "Div"),
-            ("a %= b", "Rem"),
-            ("a &= b", "BitAnd"),
-            ("a |= b", "BitOr"),
-            ("a ^= b", "BitXor"),
-            ("a <<= b", "Shl"),
-            ("a >>= b", "Shr"),
-        ] {
-            assert_eq!(parse_ok(src), format!("({op}= a b)"), "{src}");
-        }
+    #[rstest]
+    #[case("a = b", "")]
+    #[case("a += b", "Add")]
+    #[case("a -= b", "Sub")]
+    #[case("a *= b", "Mul")]
+    #[case("a /= b", "Div")]
+    #[case("a %= b", "Rem")]
+    #[case("a &= b", "BitAnd")]
+    #[case("a |= b", "BitOr")]
+    #[case("a ^= b", "BitXor")]
+    #[case("a <<= b", "Shl")]
+    #[case("a >>= b", "Shr")]
+    fn assignment(#[case] src: &str, #[case] op: &str) {
+        assert_eq!(parse_ok(src), format!("({op}= a b)"));
     }
 
-    #[test]
-    fn assignment_is_right_associative_and_weakest() {
-        assert_eq!(parse_ok("a = b = c"), "(= a (= b c))");
-        assert_eq!(parse_ok("a = b..c"), "(= a (.. b c))");
-        assert_eq!(parse_ok("a += b || c"), "(Add= a (Or b c))");
-        assert_eq!(parse_ok("*a = -b"), "(= (Deref a) (Neg b))");
+    #[rstest]
+    #[case("a = b = c", "(= a (= b c))")]
+    #[case("a = b..c", "(= a (.. b c))")]
+    #[case("a += b || c", "(Add= a (Or b c))")]
+    #[case("*a = -b", "(= (Deref a) (Neg b))")]
+    fn assignment_is_right_associative_and_weakest(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
     }
 
     #[test]

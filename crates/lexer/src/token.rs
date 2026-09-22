@@ -590,73 +590,61 @@ mod tests {
         assert_eq!(lex(src), [(Err(error), 0..src.len())]);
     }
 
-    #[test]
-    fn char_literals() {
-        for src in [
-            "'a'",
-            "'あ'",
-            "'\"'",
-            r"'\n'",
-            r"'\''",
-            r"'\\'",
-            r"'\0'",
-            r"'\x7F'",
-            r"'\u{1F600}'",
-            r"'\u{10_FFFF}'",
-        ] {
-            assert_eq!(lex(src), [(Ok(Token::Char), 0..src.len())], "{src}");
-        }
+    #[rstest]
+    #[case("'a'")]
+    #[case("'あ'")]
+    #[case("'\"'")]
+    #[case(r"'\n'")]
+    #[case(r"'\''")]
+    #[case(r"'\\'")]
+    #[case(r"'\0'")]
+    #[case(r"'\x7F'")]
+    #[case(r"'\u{1F600}'")]
+    #[case(r"'\u{10_FFFF}'")]
+    fn char_literal(#[case] src: &str) {
+        assert_eq!(lex(src), [(Ok(Token::Char), 0..src.len())]);
     }
 
-    #[test]
-    fn invalid_char_literals() {
-        for (src, error) in [
-            ("''", LexError::EmptyCharLiteral),
-            ("'ab'", LexError::TooManyCharsInCharLiteral),
-            ("'a", LexError::UnterminatedCharLiteral),
-            ("'''", LexError::UnescapedCharInCharLiteral),
-            ("'\t'", LexError::UnescapedCharInCharLiteral),
-            (r"'\q'", LexError::InvalidEscape),
-            (r"'\x80'", LexError::InvalidEscape),
-            (r"'\u{110000}'", LexError::InvalidUnicodeEscape),
-            (r"'\u{D800}'", LexError::InvalidUnicodeEscape),
-            (r"'\u{}'", LexError::InvalidUnicodeEscape),
-            (r"'\u{1234567}'", LexError::InvalidUnicodeEscape),
-            ("'a'x", LexError::ReservedLiteralSuffix),
-        ] {
-            assert_eq!(lex(src), [(Err(error), 0..src.len())], "{src}");
-        }
+    #[rstest]
+    #[case("''", LexError::EmptyCharLiteral)]
+    #[case("'ab'", LexError::TooManyCharsInCharLiteral)]
+    #[case("'a", LexError::UnterminatedCharLiteral)]
+    #[case("'''", LexError::UnescapedCharInCharLiteral)]
+    #[case("'\t'", LexError::UnescapedCharInCharLiteral)]
+    #[case(r"'\q'", LexError::InvalidEscape)]
+    #[case(r"'\x80'", LexError::InvalidEscape)]
+    #[case(r"'\u{110000}'", LexError::InvalidUnicodeEscape)]
+    #[case(r"'\u{D800}'", LexError::InvalidUnicodeEscape)]
+    #[case(r"'\u{}'", LexError::InvalidUnicodeEscape)]
+    #[case(r"'\u{1234567}'", LexError::InvalidUnicodeEscape)]
+    #[case("'a'x", LexError::ReservedLiteralSuffix)]
+    fn invalid_char_literal(#[case] src: &str, #[case] error: LexError) {
+        assert_eq!(lex(src), [(Err(error), 0..src.len())]);
     }
 
-    #[test]
-    fn string_literals() {
-        for src in [
-            r#""""#,
-            r#""abc""#,
-            r#""'""#,
-            r#""a\nb""#,
-            r#""\"\\""#,
-            r#""\\u{110000}""#,
-            "\"line\nnext\"",
-            "\"line\r\nnext\"",
-            "\"a\\\n    b\"",
-            "\"a\\\r\n    b\"",
-        ] {
-            assert_eq!(lex(src), [(Ok(Token::Str), 0..src.len())], "{src:?}");
-        }
+    #[rstest]
+    #[case(r#""""#)]
+    #[case(r#""abc""#)]
+    #[case(r#""'""#)]
+    #[case(r#""a\nb""#)]
+    #[case(r#""\"\\""#)]
+    #[case(r#""\\u{110000}""#)]
+    #[case("\"line\nnext\"")]
+    #[case("\"line\r\nnext\"")]
+    #[case("\"a\\\n    b\"")]
+    #[case("\"a\\\r\n    b\"")]
+    fn string_literal(#[case] src: &str) {
+        assert_eq!(lex(src), [(Ok(Token::Str), 0..src.len())]);
     }
 
-    #[test]
-    fn invalid_string_literals() {
-        for (src, error) in [
-            (r#""abc"#, LexError::UnterminatedStringLiteral),
-            (r#""a\qb""#, LexError::InvalidEscape),
-            ("\"a\rb\"", LexError::BareCarriageReturn),
-            (r#""\u{D800}""#, LexError::InvalidUnicodeEscape),
-            (r#""abc"x"#, LexError::ReservedLiteralSuffix),
-        ] {
-            assert_eq!(lex(src), [(Err(error), 0..src.len())], "{src:?}");
-        }
+    #[rstest]
+    #[case(r#""abc"#, LexError::UnterminatedStringLiteral)]
+    #[case(r#""a\qb""#, LexError::InvalidEscape)]
+    #[case("\"a\rb\"", LexError::BareCarriageReturn)]
+    #[case(r#""\u{D800}""#, LexError::InvalidUnicodeEscape)]
+    #[case(r#""abc"x"#, LexError::ReservedLiteralSuffix)]
+    fn invalid_string_literal(#[case] src: &str, #[case] error: LexError) {
+        assert_eq!(lex(src), [(Err(error), 0..src.len())]);
     }
 
     #[test]
@@ -670,104 +658,108 @@ mod tests {
         );
     }
 
-    #[test]
-    fn byte_literals() {
-        for src in [
-            "b'a'", "b'\"'", r"b'\n'", r"b'\''", r"b'\\'", r"b'\x7F'", r"b'\xFF'",
-        ] {
-            assert_eq!(lex(src), [(Ok(Token::Byte), 0..src.len())], "{src}");
-        }
+    #[rstest]
+    #[case("b'a'")]
+    #[case("b'\"'")]
+    #[case(r"b'\n'")]
+    #[case(r"b'\''")]
+    #[case(r"b'\\'")]
+    #[case(r"b'\x7F'")]
+    #[case(r"b'\xFF'")]
+    fn byte_literal(#[case] src: &str) {
+        assert_eq!(lex(src), [(Ok(Token::Byte), 0..src.len())]);
     }
 
-    #[test]
-    fn invalid_byte_literals() {
-        for (src, error) in [
-            ("b'あ'", LexError::NonAsciiInByteLiteral),
-            (r"b'\u{41}'", LexError::UnicodeEscapeInByteLiteral),
-            ("b''", LexError::EmptyCharLiteral),
-            ("b'ab'", LexError::TooManyCharsInCharLiteral),
-            ("b'a", LexError::UnterminatedCharLiteral),
-            ("b'a'x", LexError::ReservedLiteralSuffix),
-            (r"b'\x1'", LexError::InvalidEscape),
-        ] {
-            assert_eq!(lex(src), [(Err(error), 0..src.len())], "{src}");
-        }
+    #[rstest]
+    #[case("b'あ'", LexError::NonAsciiInByteLiteral)]
+    #[case(r"b'\u{41}'", LexError::UnicodeEscapeInByteLiteral)]
+    #[case("b''", LexError::EmptyCharLiteral)]
+    #[case("b'ab'", LexError::TooManyCharsInCharLiteral)]
+    #[case("b'a", LexError::UnterminatedCharLiteral)]
+    #[case("b'a'x", LexError::ReservedLiteralSuffix)]
+    #[case(r"b'\x1'", LexError::InvalidEscape)]
+    fn invalid_byte_literal(#[case] src: &str, #[case] error: LexError) {
+        assert_eq!(lex(src), [(Err(error), 0..src.len())]);
     }
 
-    #[test]
-    fn byte_string_literals() {
-        for src in [
-            r#"b"""#,
-            r#"b"abc""#,
-            r#"b"あ""#,
-            r#"b"\xFF""#,
-            r#"b"\u{3042}""#,
-            "b\"line\r\nnext\"",
-            "b\"a\\\n    b\"",
-        ] {
-            assert_eq!(lex(src), [(Ok(Token::ByteStr), 0..src.len())], "{src:?}");
-        }
+    #[rstest]
+    #[case(r#"b"""#)]
+    #[case(r#"b"abc""#)]
+    #[case(r#"b"あ""#)]
+    #[case(r#"b"\xFF""#)]
+    #[case(r#"b"\u{3042}""#)]
+    #[case("b\"line\r\nnext\"")]
+    #[case("b\"a\\\n    b\"")]
+    fn byte_string_literal(#[case] src: &str) {
+        assert_eq!(lex(src), [(Ok(Token::ByteStr), 0..src.len())]);
     }
 
-    #[test]
-    fn invalid_byte_string_literals() {
-        for (src, error) in [
-            (r#"b"abc"#, LexError::UnterminatedStringLiteral),
-            (r#"b"\q""#, LexError::InvalidEscape),
-            (r#"b"\u{D800}""#, LexError::InvalidUnicodeEscape),
-            ("b\"a\rb\"", LexError::BareCarriageReturn),
-            (r#"b"a"x"#, LexError::ReservedLiteralSuffix),
-        ] {
-            assert_eq!(lex(src), [(Err(error), 0..src.len())], "{src:?}");
-        }
+    #[rstest]
+    #[case(r#"b"abc"#, LexError::UnterminatedStringLiteral)]
+    #[case(r#"b"\q""#, LexError::InvalidEscape)]
+    #[case(r#"b"\u{D800}""#, LexError::InvalidUnicodeEscape)]
+    #[case("b\"a\rb\"", LexError::BareCarriageReturn)]
+    #[case(r#"b"a"x"#, LexError::ReservedLiteralSuffix)]
+    fn invalid_byte_string_literal(#[case] src: &str, #[case] error: LexError) {
+        assert_eq!(lex(src), [(Err(error), 0..src.len())]);
     }
 
     #[test]
     fn b_alone_is_identifier() {
         assert_eq!(lex("b"), [(Ok(Token::Ident), 0..1)]);
+    }
+
+    #[test]
+    fn b_separated_from_char_is_identifier() {
         assert_eq!(
             lex("b 'a'"),
             [(Ok(Token::Ident), 0..1), (Ok(Token::Char), 2..5)]
         );
     }
 
-    #[test]
-    fn raw_string_literals() {
-        let max_hashes = format!("r{0}\"a\"{0}", "#".repeat(255));
-        for src in [
-            r#"r"""#,
-            r#"r"abc""#,
-            r#"r"\n""#,
-            r#"r"C:\path\""#,
-            r###"r#"a"b"#"###,
-            r###"r##"a"#b"##"###,
-            "r\"a\r\nb\"",
-            &max_hashes,
-        ] {
-            assert_eq!(lex(src), [(Ok(Token::RawStr), 0..src.len())], "{src:?}");
-        }
+    #[rstest]
+    #[case(r#"r"""#)]
+    #[case(r#"r"abc""#)]
+    #[case(r#"r"\n""#)]
+    #[case(r#"r"C:\path\""#)]
+    #[case(r###"r#"a"b"#"###)]
+    #[case(r###"r##"a"#b"##"###)]
+    #[case("r\"a\r\nb\"")]
+    fn raw_string_literal(#[case] src: &str) {
+        assert_eq!(lex(src), [(Ok(Token::RawStr), 0..src.len())]);
+    }
+
+    #[rstest]
+    #[case(r#"br"""#)]
+    #[case(r#"br"あ\x""#)]
+    #[case(r###"br#"a"b"#"###)]
+    fn raw_byte_string_literal(#[case] src: &str) {
+        assert_eq!(lex(src), [(Ok(Token::RawByteStr), 0..src.len())]);
+    }
+
+    #[rstest]
+    #[case(r#"r"abc"#, LexError::UnterminatedRawString)]
+    #[case(r###"r#"abc""###, LexError::UnterminatedRawString)]
+    #[case("r\"a\rb\"", LexError::BareCarriageReturn)]
+    #[case(r#"r"a"x"#, LexError::ReservedLiteralSuffix)]
+    #[case(r#"br"a"x"#, LexError::ReservedLiteralSuffix)]
+    fn invalid_raw_string_literal(#[case] src: &str, #[case] error: LexError) {
+        assert_eq!(lex(src), [(Err(error), 0..src.len())]);
     }
 
     #[test]
-    fn raw_byte_string_literals() {
-        for src in [r#"br"""#, r#"br"あ\x""#, r###"br#"a"b"#"###] {
-            assert_eq!(lex(src), [(Ok(Token::RawByteStr), 0..src.len())], "{src:?}");
-        }
+    fn raw_string_with_max_hashes() {
+        let src = format!("r{0}\"a\"{0}", "#".repeat(255));
+        assert_eq!(lex(&src), [(Ok(Token::RawStr), 0..src.len())]);
     }
 
     #[test]
-    fn invalid_raw_string_literals() {
-        let too_many_hashes = format!("r{0}\"a\"{0}", "#".repeat(256));
-        for (src, error) in [
-            (r#"r"abc"#, LexError::UnterminatedRawString),
-            (r###"r#"abc""###, LexError::UnterminatedRawString),
-            ("r\"a\rb\"", LexError::BareCarriageReturn),
-            (r#"r"a"x"#, LexError::ReservedLiteralSuffix),
-            (r#"br"a"x"#, LexError::ReservedLiteralSuffix),
-            (&too_many_hashes, LexError::TooManyRawStringHashes),
-        ] {
-            assert_eq!(lex(src), [(Err(error), 0..src.len())], "{src:?}");
-        }
+    fn raw_string_with_too_many_hashes() {
+        let src = format!("r{0}\"a\"{0}", "#".repeat(256));
+        assert_eq!(
+            lex(&src),
+            [(Err(LexError::TooManyRawStringHashes), 0..src.len())]
+        );
     }
 
     #[test]
@@ -778,31 +770,27 @@ mod tests {
         );
     }
 
-    #[test]
-    fn comments_are_skipped() {
-        for src in [
-            "a // x\nb",
-            "a // x\r\nb",
-            "a /* x */ b",
-            "a/*x*/b",
-            "a /* x /* y */ z */ b",
-            "a /**/ b",
-            "a /*/ */ b",
-            "a /*x/*y*/z*/ b",
-            "a /*x**/ b",
-            "a /*x//*y*/*/ b",
-            "a /// x\nb",
-            "a //! x\nb",
-            "a /** x */ b",
-            "a /*! x */ b",
-        ] {
-            let b = src.len() - 1;
-            assert_eq!(
-                lex(src),
-                [(Ok(Token::Ident), 0..1), (Ok(Token::Ident), b..b + 1)],
-                "{src:?}"
-            );
-        }
+    #[rstest]
+    #[case("a // x\nb")]
+    #[case("a // x\r\nb")]
+    #[case("a /* x */ b")]
+    #[case("a/*x*/b")]
+    #[case("a /* x /* y */ z */ b")]
+    #[case("a /**/ b")]
+    #[case("a /*/ */ b")]
+    #[case("a /*x/*y*/z*/ b")]
+    #[case("a /*x**/ b")]
+    #[case("a /*x//*y*/*/ b")]
+    #[case("a /// x\nb")]
+    #[case("a //! x\nb")]
+    #[case("a /** x */ b")]
+    #[case("a /*! x */ b")]
+    fn comment_is_skipped(#[case] src: &str) {
+        let b = src.len() - 1;
+        assert_eq!(
+            lex(src),
+            [(Ok(Token::Ident), 0..1), (Ok(Token::Ident), b..b + 1)]
+        );
     }
 
     #[test]
@@ -812,17 +800,30 @@ mod tests {
 
     #[test]
     fn unterminated_block_comment_is_error() {
-        let error = LexError::UnterminatedBlockComment;
         assert_eq!(
             lex("a /* x"),
-            [(Ok(Token::Ident), 0..1), (Err(error), 2..6)]
+            [
+                (Ok(Token::Ident), 0..1),
+                (Err(LexError::UnterminatedBlockComment), 2..6)
+            ]
         );
-        assert_eq!(lex("/* /* */"), [(Err(error), 0..8)]);
     }
 
     #[test]
-    fn comment_markers_in_other_contexts() {
+    fn unterminated_nested_block_comment_is_error() {
+        assert_eq!(
+            lex("/* /* */"),
+            [(Err(LexError::UnterminatedBlockComment), 0..8)]
+        );
+    }
+
+    #[test]
+    fn comment_marker_in_string() {
         assert_eq!(lex(r#""// x""#), [(Ok(Token::Str), 0..6)]);
+    }
+
+    #[test]
+    fn block_comment_end_without_start() {
         assert_eq!(
             lex("*/"),
             [(Ok(Token::Star), 0..1), (Ok(Token::Slash), 1..2)]
