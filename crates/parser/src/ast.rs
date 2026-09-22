@@ -27,6 +27,39 @@ pub enum ExprKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Lit {
     Bool(bool),
+    Int {
+        value: u64,
+        suffix: Option<IntSuffix>,
+    },
+    /// `f32` / `f64` のどちらになるかは型検査で決まるため、`_` を除いた 10 進表記で保持する
+    Float {
+        digits: String,
+        suffix: Option<FloatSuffix>,
+    },
+    Char(char),
+    Byte(u8),
+    Str(String),
+    ByteStr(Vec<u8>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntSuffix {
+    I8,
+    I16,
+    I32,
+    I64,
+    Isize,
+    U8,
+    U16,
+    U32,
+    U64,
+    Usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatSuffix {
+    F32,
+    F64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
