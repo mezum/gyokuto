@@ -184,13 +184,11 @@ where
                     .ignore_then(ident)
                     .map(|name| PostfixOp::Field(Field::Named(name))),
                 just(Token::Dot)
-                    .ignore_then(one_of([Token::Int, Token::Float]))
-                    .to_span()
+                    .ignore_then(one_of([Token::Int, Token::Float]).to_span())
                     .validate(move |span: Span, _, emitter| {
-                        let index = span.start + 1;
-                        tuple_indices(&src[index..span.end], index).unwrap_or_else(|| {
+                        tuple_indices(&src[span.into_range()], span.start).unwrap_or_else(|| {
                             emitter.emit(Error {
-                                span: Span::from(index..span.end),
+                                span,
                                 kind: ErrorKind::InvalidTupleIndex,
                             });
                             Vec::new()
@@ -916,6 +914,11 @@ mod tests {
     #[test]
     fn deeply_nested_tuple_fields() {
         assert_eq!(parse_ok("t.1.2.3"), "(field (field (field t 1) 2) 3)");
+    }
+
+    #[test]
+    fn tuple_field_after_whitespace() {
+        assert_eq!(parse_ok("t. /* c */ 0"), "(field t 0)");
     }
 
     #[test]
