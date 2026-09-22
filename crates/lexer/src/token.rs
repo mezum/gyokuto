@@ -2,7 +2,6 @@ use logos::{Lexer, Logos};
 
 #[derive(Logos, Debug, Clone, Copy, PartialEq, Eq)]
 #[logos(skip r"\p{Pattern_White_Space}+")]
-// 行コメントは LF の直前まで読むのが仕様どおりなので、貪欲な繰り返しを許可する
 #[logos(skip(r"//[^\n]*", allow_greedy = true))]
 #[logos(skip(r"/\*", callback = block_comment))]
 #[logos(subpattern dec = r"[0-9][0-9_]*")]
