@@ -31,8 +31,24 @@
   - コメントは関数の doc コメント程度に留め、判断の背景はコミットメッセージや PR に書く
 - 単一モジュールのテストは、そのモジュールのソース内に `#[cfg(test)] mod tests` として書く
   - `tests` ディレクトリは複数モジュールや crate をまたぐ結合テスト以上に限定する
+- テストは [rstest] の `#[case]` を使い、1 ケース 1 テストとする
+  - ループや複数の `assert` で複数のケースをまとめない (失敗したケースが分かるようにする)
 - `lib.rs` は `mod` / `pub mod` と `pub use` を主とし、実装は書かない
 - ライブラリは原則 [ルートの Cargo.toml](root-cargo.toml) に `workspace.dependency` として追加
+
+## Parser
+
+構文解析 (`crates/parser`) は [chumsky] を使う。
+
+- `Recursive::declare` / `define` は強参照の循環でリークするため使わず、`recursive` を入れ子にする
+- 同じ入力を別の構成で解析し直す作りにしない。入れ子にしたときに解析時間が指数的に増える
+  - 後続のトークン (`;` `}` `,`) を見て分岐するか、一度だけ解析した AST を検査する
+  - 例: ブロックの末尾の式、構造体のパターンの末尾のフィールド、`let ... else` の初期化の式
+- 式・型・パターンは相互に再帰するため、内側の解析器は引数で受け取る (`ty(src, expr, block_like)` など)
+- 条件式は、括弧の外にブロック様の式を含まない `expr_with(.., false)` で解析する
+- AST の確認は `AsSexpr` の S 式で行い、`Display` は実装しない
+- 型引数を閉じる `>` のため、字句解析の後に `>` で始まるトークンを 1 文字ずつに分割している
+  - 演算子としては [`glued`] で隣接するトークンをまとめ直す
 
 ## Boundary
 
@@ -59,6 +75,9 @@
    - 修正前に致命度や頻度を考慮して実際に修正するか判断
 10. レビュー対応が完了したら、 `Just lint` を行い必要に応じて修正
 11. (1.) で建てた issue をクローズする PR を作成
+    - 1 つの Issue を複数の PR に分ける場合は [gh stack] を使い、最後の PR で Issue をクローズする
+    - `gh stack submit` で作った PR は draft になるため、レビューを依頼する前に `gh pr ready` で解除する
+    - 差分行数は `git diff --shortstat main` で確認する。インデントの変更も行数に入るため、リファクタリングは別のコミットに分ける
 12. Issue や PR にユーザーからのレビューコメントが付いたら、必要に応じて対応を行い、スレッドに返信する
     - スレッドはユーザーが確認の上で閉じるため、指示を受けるまでは解決済みにしないこと
 13. ユーザーまたはコントリビューターの LGTM を得て、なおかつ CI が通過したら PR をマージする
@@ -73,3 +92,7 @@
 [Just](https://github.com/casey/just)
 [Justfile](./Justfile)
 [root-cargo.toml](./Cargo.toml)
+[rstest](https://github.com/la10736/rstest)
+[chumsky](https://github.com/zesterer/chumsky)
+[`glued`](./crates/parser/src/parser.rs)
+[gh stack](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/merging-stacked-pull-requests)
