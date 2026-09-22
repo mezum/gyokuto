@@ -78,9 +78,11 @@ fn escape_error(chars: &mut Peekable<Chars>, kind: Quoted) -> Option<LexError> {
         }
         Some('u') if kind == Quoted::Byte => Some(LexError::UnicodeEscapeInByteLiteral),
         Some('u') => {
-            let digits: String = (chars.next() == Some('{'))
-                .then(|| chars.by_ref().take_while(|&c| c != '}').collect())
-                .unwrap_or_default();
+            let digits: String = if chars.next() == Some('{') {
+                chars.by_ref().take_while(|&c| c != '}').collect()
+            } else {
+                String::new()
+            };
             let digits: String = digits.chars().filter(|&c| c != '_').collect();
             let valid = (1..=6).contains(&digits.len())
                 && digits.chars().all(|c| c.is_ascii_hexdigit())
