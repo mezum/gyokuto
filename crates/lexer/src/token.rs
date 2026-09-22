@@ -2,6 +2,8 @@ use logos::{Lexer, Logos};
 
 #[derive(Logos, Debug, Clone, Copy, PartialEq, Eq)]
 #[logos(skip r"\p{Pattern_White_Space}+")]
+#[logos(skip(r"//[^\n]*", allow_greedy = true))]
+#[logos(skip(r"/\*", callback = block_comment))]
 #[logos(subpattern dec = r"[0-9][0-9_]*")]
 #[logos(subpattern hex = r"0x[0-9a-fA-F_]*[0-9a-fA-F][0-9a-fA-F_]*")]
 #[logos(subpattern oct = r"0o[0-7_]*[0-7][0-7_]*")]
@@ -254,6 +256,29 @@ fn raw_string(lex: &mut Lexer<Token>) -> bool {
         .sum();
     lex.bump(end + terminator.len() + suffix_len);
     hashes <= 255 && !has_bare_cr && suffix_len == 0
+}
+
+/// ブロックコメントを、ネストの深さを数えて対応する `*/` まで読み飛ばす
+///
+/// ネストの対応は正規表現で表現できないため、開始部分以降をここで扱う
+fn block_comment(lex: &mut Lexer<Token>) -> Result<(), ()> {
+    let remainder = lex.remainder().as_bytes();
+    let mut depth = 1;
+    let mut i = 0;
+    while depth > 0 {
+        match remainder.get(i..i + 2) {
+            Some(b"/*") => (depth, i) = (depth + 1, i + 2),
+            Some(b"*/") => (depth, i) = (depth - 1, i + 2),
+            Some([_, b'/' | b'*']) => i += 1,
+            Some(_) => i += 2,
+            None => {
+                lex.bump(remainder.len());
+                return Err(());
+            }
+        }
+    }
+    lex.bump(i);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -696,6 +721,53 @@ mod tests {
         assert_eq!(
             lex(r###"r#"a"# x"###),
             [(Ok(Token::RawStr), 0..6), (Ok(Token::Ident), 7..8)]
+        );
+    }
+
+    #[test]
+    fn comments_are_skipped() {
+        for src in [
+            "a // x\nb",
+            "a // x\r\nb",
+            "a /* x */ b",
+            "a/*x*/b",
+            "a /* x /* y */ z */ b",
+            "a /**/ b",
+            "a /*/ */ b",
+            "a /*x/*y*/z*/ b",
+            "a /*x**/ b",
+            "a /*x//*y*/*/ b",
+            "a /// x\nb",
+            "a //! x\nb",
+            "a /** x */ b",
+            "a /*! x */ b",
+        ] {
+            let b = src.len() - 1;
+            assert_eq!(
+                lex(src),
+                [(Ok(Token::Ident), 0..1), (Ok(Token::Ident), b..b + 1)],
+                "{src:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn line_comment_until_end_of_input() {
+        assert_eq!(lex("a // x"), [(Ok(Token::Ident), 0..1)]);
+    }
+
+    #[test]
+    fn unterminated_block_comment_is_error() {
+        assert_eq!(lex("a /* x"), [(Ok(Token::Ident), 0..1), (Err(()), 2..6)]);
+        assert_eq!(lex("/* /* */"), [(Err(()), 0..8)]);
+    }
+
+    #[test]
+    fn comment_markers_in_other_contexts() {
+        assert_eq!(lex(r#""// x""#), [(Ok(Token::Str), 0..6)]);
+        assert_eq!(
+            lex("*/"),
+            [(Ok(Token::Star), 0..1), (Ok(Token::Slash), 1..2)]
         );
     }
 }
