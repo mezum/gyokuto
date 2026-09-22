@@ -55,15 +55,15 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: test-times
-      - name: テスト時間の概要を PR にコメントする
+      - name: テスト時間の概要をまとめる
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           { echo '## テスト時間'; head -1 test-times.md; echo; echo "詳細: $RUN_URL"; } > comment.md
-          gh pr comment "$PR" --edit-last --create-if-none --body-file comment.md
+      - uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          header: test-times
+          path: comment.md
       - name: artifact を削除する
         env:
           GH_TOKEN: ${{ github.token }}
