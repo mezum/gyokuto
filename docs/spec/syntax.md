@@ -23,8 +23,8 @@
 ## 式
 
 ```ebnf
-Expr        ::= AssignExpr
-PrimaryExpr ::= LiteralExpr | PathExpr | ParenExpr | TupleExpr | ArrayExpr | BlockExpr
+Expr        ::= AssignExpr | BreakExpr | ContinueExpr | ReturnExpr
+PrimaryExpr ::= LiteralExpr | PathExpr | ParenExpr | TupleExpr | ArrayExpr | BlockLikeExpr
 ```
 
 ### リテラル式
@@ -83,6 +83,35 @@ BlockExpr ::= '{' Stmt* Expr? '}'
 - 末尾の `;` を付けない式をブロックの値とする
   - 末尾の式が無い場合、ブロックの値は `()` となる
 - ブロック内の `let` で導入した変数のスコープはブロックの終わりまでとする
+
+### 制御式
+
+```ebnf
+IfExpr       ::= 'if' CondExpr BlockExpr ( 'else' ( BlockExpr | IfExpr ) )?
+LoopExpr     ::= 'loop' BlockExpr
+WhileExpr    ::= 'while' CondExpr BlockExpr
+ForExpr      ::= 'for' IDENT 'in' CondExpr BlockExpr
+CondExpr     ::= Expr
+BreakExpr    ::= 'break' Expr?
+ContinueExpr ::= 'continue'
+ReturnExpr   ::= 'return' Expr?
+```
+
+- 条件式 (CondExpr) では、括弧 `()` `[]` の外にブロック様の式を書けない
+  - 条件式の後の `{` は常に本体の開始とする。`for i in 0.. { ... }` は終端を省略した範囲となる
+  - ブロック様の式を使う場合は `if ({ a }) { ... }` のように括弧で囲む
+- `if` の値は実行した分岐のブロックの値とする
+  - `else` が無い場合、値は `()` となる
+  - 各分岐の値の型が一致するかは型検査で検査する
+- `loop` の値は `break` の値とし、`while` / `for` の値は `()` とする
+  - 値付きの `break` は `loop` の中でのみ使える。構文上はどのループでも受理し、型検査で検査する
+- `for` の左辺はパターンを定めるまで識別子のみとする
+- `break` / `continue` はもっとも内側のループを対象とする。ラベルは無い
+  - ループの外で使っているかは型検査で検査する
+- `break` / `continue` / `return` は発散し、型は `!` となる
+- `break` / `return` の後に式が始まらないトークンが続く場合は、値を省略したものとする
+- `break` / `continue` / `return` は演算子のオペランドには置けない
+  - `return a = b` は `return (a = b)` となる。`a + return` のように使う場合は括弧で囲む
 
 ### 後置式
 
@@ -171,7 +200,7 @@ Stmt          ::= LetStmt | ExprStmt
 LetStmt       ::= 'let' 'mut'? IDENT ( ':' Type )? ( '=' Expr )? ';'
 ExprStmt      ::= Expr ';'
                 | BlockLikeExpr
-BlockLikeExpr ::= BlockExpr
+BlockLikeExpr ::= BlockExpr | IfExpr | LoopExpr | WhileExpr | ForExpr
 ```
 
 - `let` は変数を導入する
