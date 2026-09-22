@@ -233,11 +233,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sexpr::AsSexpr;
 
     fn parse_ok(src: &str) -> String {
         let (ty, errors) = parse_type(src);
         assert!(errors.is_empty(), "{src}: {errors:?}");
-        ty.unwrap().to_string()
+        ty.unwrap().as_sexpr()
     }
 
     #[test]
@@ -378,6 +379,6 @@ mod tests {
     fn recovers_inside_delimiters() {
         let (ty, errors) = parse_type("(A, [B C])");
         assert_eq!(errors.len(), 1, "{errors:?}");
-        assert_eq!(ty.unwrap().to_string(), "(tuple A error)");
+        assert_eq!(ty.unwrap().as_sexpr(), "(tuple A error)");
     }
 }

@@ -501,12 +501,13 @@ where
 mod tests {
     use super::*;
     use crate::error::{ErrorKind, Expected, Found, LiteralError};
+    use crate::sexpr::AsSexpr;
     use gyokuto_lexer::LexError;
 
     fn parse_ok(src: &str) -> String {
         let (expr, errors) = parse_expr(src);
         assert!(errors.is_empty(), "{src}: {errors:?}");
-        expr.unwrap().to_string()
+        expr.unwrap().as_sexpr()
     }
 
     #[test]
@@ -539,7 +540,7 @@ mod tests {
             errors[0].kind,
             ErrorKind::Literal(LiteralError::IntegerTooLarge)
         );
-        assert_eq!(expr.unwrap().to_string(), "(array error a)");
+        assert_eq!(expr.unwrap().as_sexpr(), "(array error a)");
     }
 
     #[test]
@@ -584,7 +585,7 @@ mod tests {
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert_eq!(errors[0].span.into_range(), 0..1);
         assert_eq!(errors[0].kind, ErrorKind::Lex(LexError::UnexpectedChar));
-        assert_eq!(expr.unwrap().to_string(), "error");
+        assert_eq!(expr.unwrap().as_sexpr(), "error");
     }
 
     #[test]
@@ -645,14 +646,14 @@ mod tests {
             ),
             "{errors:?}"
         );
-        assert_eq!(expr.unwrap().to_string(), "(array error c)");
+        assert_eq!(expr.unwrap().as_sexpr(), "(array error c)");
     }
 
     #[test]
     fn lexical_error_inside_delimiters() {
         let (expr, errors) = parse_expr("[a, $]");
         assert_eq!(errors.len(), 1, "{errors:?}");
-        assert_eq!(expr.unwrap().to_string(), "(array a error)");
+        assert_eq!(expr.unwrap().as_sexpr(), "(array a error)");
     }
 
     #[test]
