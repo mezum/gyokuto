@@ -1,7 +1,7 @@
-use crate::ast::{Expr, ExprKind, GenericArg, GenericArgs, Path, Span, Type, TypeKind, UnaryOp};
+use crate::ast::{Expr, GenericArg, GenericArgs, Path, Span, Type, TypeKind};
 use crate::control::block_like;
 use crate::error::Error;
-use crate::parser::{Extra, expr, input, lex, literal, path};
+use crate::parser::{Extra, expr, input, lex, path, signed_literal};
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
 use std::iter::once;
@@ -207,19 +207,6 @@ where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
     let block = just(Token::LBrace).rewind().ignore_then(block_like);
-    let lit = literal(src).map_with(|kind, e| Expr {
-        kind,
-        span: e.span(),
-    });
-    let neg_lit = just(Token::Minus)
-        .ignore_then(lit.clone())
-        .map_with(|lit, e| Expr {
-            kind: ExprKind::Unary {
-                op: UnaryOp::Neg,
-                expr: Box::new(lit),
-            },
-            span: e.span(),
-        });
     let binding = just(Token::Ident)
         .to_span()
         .then_ignore(just(Token::Eq))
@@ -230,7 +217,7 @@ where
         });
     let arg = choice((
         binding,
-        lit.or(neg_lit).or(block.clone()).map(GenericArg::Const),
+        signed_literal(src).or(block.clone()).map(GenericArg::Const),
         just(Token::Dyn).ignore_then(block).map(GenericArg::Dyn),
         ty.map(GenericArg::Type),
     ));

@@ -506,6 +506,29 @@ where
     choice((bool_lit, lit))
 }
 
+/// リテラルか、`-` を前置したリテラルを解析する
+pub(crate) fn signed_literal<'tok, 'src: 'tok, I>(
+    src: &'src str,
+) -> impl Parser<'tok, I, Expr, Extra> + Clone
+where
+    I: ValueInput<'tok, Token = Token, Span = Span>,
+{
+    let lit = literal(src).map_with(|kind, e| Expr {
+        kind,
+        span: e.span(),
+    });
+    let neg_lit = just(Token::Minus)
+        .ignore_then(lit.clone())
+        .map_with(|lit, e| Expr {
+            kind: ExprKind::Unary {
+                op: UnaryOp::Neg,
+                expr: Box::new(lit),
+            },
+            span: e.span(),
+        });
+    lit.or(neg_lit)
+}
+
 /// パスを解析する。各セグメントの後には型引数として `args` を続けて解析する
 pub(crate) fn path<'tok, 'src: 'tok, I>(
     src: &'src str,
