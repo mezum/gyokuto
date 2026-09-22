@@ -1,4 +1,4 @@
-use crate::ast::{Expr, ExprKind, GenericArg, GenericArgs, Span, Type, TypeKind, UnaryOp};
+use crate::ast::{Expr, ExprKind, GenericArg, GenericArgs, Path, Span, Type, TypeKind, UnaryOp};
 use crate::error::Error;
 use crate::parser::{Extra, expr, input, lex, literal, path};
 use chumsky::{input::ValueInput, prelude::*};
@@ -25,114 +25,8 @@ where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
     recursive(|ty| {
-        let types = ty
-            .clone()
-            .separated_by(just(Token::Comma))
-            .allow_trailing()
-            .collect::<Vec<_>>()
-            .delimited_by(just(Token::LParen), just(Token::RParen));
-        let signature = |no_bounds| {
-            types.clone().then(
-                just(Token::Arrow)
-                    .ignore_then(no_bounds)
-                    .or_not()
-                    .map(|ret: Option<Type>| ret.map(Box::new)),
-            )
-        };
-
-        let angle_args = angle_args(src, ty.clone());
-        let type_path = |no_bounds| {
-            let args =
-                angle_args.clone().or(signature(no_bounds)
-                    .map(|(inputs, output)| GenericArgs::Paren { inputs, output }));
-            path(src, args.or_not())
-        };
-
-        let rest_items = just(Token::Comma).ignore_then(
-            ty.clone()
-                .separated_by(just(Token::Comma))
-                .allow_trailing()
-                .collect::<Vec<_>>(),
-        );
-        let parens = ty
-            .clone()
-            .then(rest_items.or_not())
-            .or_not()
-            .delimited_by(just(Token::LParen), just(Token::RParen))
-            .map(|inner| match inner {
-                None => TypeKind::Tuple(Vec::new()),
-                Some((first, None)) => TypeKind::Paren(Box::new(first)),
-                Some((first, Some(rest))) => TypeKind::Tuple(once(first).chain(rest).collect()),
-            });
-
-        let array = ty
-            .clone()
-            .then(just(Token::Semi).ignore_then(expr).or_not())
-            .delimited_by(just(Token::LBracket), just(Token::RBracket))
-            .map(|(elem, len)| match len {
-                None => TypeKind::Slice(Box::new(elem)),
-                Some(len) => TypeKind::Array {
-                    elem: Box::new(elem),
-                    len: Box::new(len),
-                },
-            });
-
-        let error = |span| Type {
-            kind: TypeKind::Error,
-            span,
-        };
-        let no_bounds = recursive(|no_bounds| {
-            let type_path = type_path(no_bounds.clone());
-            let reference = just(Token::Amp)
-                .ignore_then(just(Token::Mut).or_not())
-                .then(no_bounds.clone())
-                .map(|(mutable, ty)| TypeKind::Ref {
-                    mutable: mutable.is_some(),
-                    ty: Box::new(ty),
-                });
-            let fn_type = just(Token::Fn)
-                .ignore_then(signature(no_bounds))
-                .map(|(params, ret)| TypeKind::Fn { params, ret });
-            choice((
-                type_path.clone().map(TypeKind::Path),
-                reference,
-                parens,
-                array,
-                fn_type,
-                just(Token::Dyn)
-                    .ignore_then(type_path.clone())
-                    .map(|path| TypeKind::Dyn(vec![path])),
-                just(Token::Impl)
-                    .ignore_then(type_path)
-                    .map(|path| TypeKind::Impl(vec![path])),
-                just(Token::Bang).to(TypeKind::Never),
-                just(Token::Underscore).to(TypeKind::Infer),
-            ))
-            .map_with(|kind, e| Type {
-                kind,
-                span: e.span(),
-            })
-            .recover_with(via_parser(nested_delimiters(
-                Token::LParen,
-                Token::RParen,
-                [
-                    (Token::LBracket, Token::RBracket),
-                    (Token::LBrace, Token::RBrace),
-                ],
-                error,
-            )))
-            .recover_with(via_parser(nested_delimiters(
-                Token::LBracket,
-                Token::RBracket,
-                [
-                    (Token::LParen, Token::RParen),
-                    (Token::LBrace, Token::RBrace),
-                ],
-                error,
-            )))
-        });
-
-        let bounds = type_path(no_bounds.clone())
+        let no_bounds = no_bounds(src, expr, ty.clone());
+        let bounds = type_path(src, ty, no_bounds.clone())
             .separated_by(just(Token::Plus))
             .at_least(1)
             .collect::<Vec<_>>();
@@ -148,6 +42,134 @@ where
         })
         .or(no_bounds)
     })
+}
+
+/// TypeNoBounds を解析する。内側の型は `ty` で解析する
+fn no_bounds<'tok, 'src: 'tok, I>(
+    src: &'src str,
+    expr: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
+    ty: impl Parser<'tok, I, Type, Extra> + Clone + 'tok,
+) -> impl Parser<'tok, I, Type, Extra> + Clone
+where
+    I: ValueInput<'tok, Token = Token, Span = Span>,
+{
+    let rest_items = just(Token::Comma).ignore_then(
+        ty.clone()
+            .separated_by(just(Token::Comma))
+            .allow_trailing()
+            .collect::<Vec<_>>(),
+    );
+    let parens = ty
+        .clone()
+        .then(rest_items.or_not())
+        .or_not()
+        .delimited_by(just(Token::LParen), just(Token::RParen))
+        .map(|inner| match inner {
+            None => TypeKind::Tuple(Vec::new()),
+            Some((first, None)) => TypeKind::Paren(Box::new(first)),
+            Some((first, Some(rest))) => TypeKind::Tuple(once(first).chain(rest).collect()),
+        });
+
+    let array = ty
+        .clone()
+        .then(just(Token::Semi).ignore_then(expr).or_not())
+        .delimited_by(just(Token::LBracket), just(Token::RBracket))
+        .map(|(elem, len)| match len {
+            None => TypeKind::Slice(Box::new(elem)),
+            Some(len) => TypeKind::Array {
+                elem: Box::new(elem),
+                len: Box::new(len),
+            },
+        });
+
+    let error = |span| Type {
+        kind: TypeKind::Error,
+        span,
+    };
+    recursive(|no_bounds| {
+        let type_path = type_path(src, ty.clone(), no_bounds.clone());
+        let reference = just(Token::Amp)
+            .ignore_then(just(Token::Mut).or_not())
+            .then(no_bounds.clone())
+            .map(|(mutable, ty)| TypeKind::Ref {
+                mutable: mutable.is_some(),
+                ty: Box::new(ty),
+            });
+        let fn_type = just(Token::Fn)
+            .ignore_then(signature(ty, no_bounds))
+            .map(|(params, ret)| TypeKind::Fn { params, ret });
+        choice((
+            type_path.clone().map(TypeKind::Path),
+            reference,
+            parens,
+            array,
+            fn_type,
+            just(Token::Dyn)
+                .ignore_then(type_path.clone())
+                .map(|path| TypeKind::Dyn(vec![path])),
+            just(Token::Impl)
+                .ignore_then(type_path)
+                .map(|path| TypeKind::Impl(vec![path])),
+            just(Token::Bang).to(TypeKind::Never),
+            just(Token::Underscore).to(TypeKind::Infer),
+        ))
+        .map_with(|kind, e| Type {
+            kind,
+            span: e.span(),
+        })
+        .recover_with(via_parser(nested_delimiters(
+            Token::LParen,
+            Token::RParen,
+            [
+                (Token::LBracket, Token::RBracket),
+                (Token::LBrace, Token::RBrace),
+            ],
+            error,
+        )))
+        .recover_with(via_parser(nested_delimiters(
+            Token::LBracket,
+            Token::RBracket,
+            [
+                (Token::LParen, Token::RParen),
+                (Token::LBrace, Token::RBrace),
+            ],
+            error,
+        )))
+    })
+}
+
+/// 型のパスを解析する。型引数の型は `ty`、`Fn() -> R` の戻り値の型は `no_bounds` で解析する
+fn type_path<'tok, 'src: 'tok, I>(
+    src: &'src str,
+    ty: impl Parser<'tok, I, Type, Extra> + Clone + 'tok,
+    no_bounds: impl Parser<'tok, I, Type, Extra> + Clone + 'tok,
+) -> impl Parser<'tok, I, Path, Extra> + Clone
+where
+    I: ValueInput<'tok, Token = Token, Span = Span>,
+{
+    let args = angle_args(src, ty.clone())
+        .or(signature(ty, no_bounds).map(|(inputs, output)| GenericArgs::Paren { inputs, output }));
+    path(src, args.or_not())
+}
+
+/// `(A, B) -> R` を解析する
+fn signature<'tok, I>(
+    ty: impl Parser<'tok, I, Type, Extra> + Clone,
+    no_bounds: impl Parser<'tok, I, Type, Extra> + Clone,
+) -> impl Parser<'tok, I, (Vec<Type>, Option<Box<Type>>), Extra> + Clone
+where
+    I: ValueInput<'tok, Token = Token, Span = Span>,
+{
+    ty.separated_by(just(Token::Comma))
+        .allow_trailing()
+        .collect::<Vec<_>>()
+        .delimited_by(just(Token::LParen), just(Token::RParen))
+        .then(
+            just(Token::Arrow)
+                .ignore_then(no_bounds)
+                .or_not()
+                .map(|ret| ret.map(Box::new)),
+        )
 }
 
 /// `<A, B>` の型引数を解析する
