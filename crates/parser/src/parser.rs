@@ -1,36 +1,38 @@
 use crate::ast::{Expr, ExprKind, Lit, Path, PathSegment, Span};
+use crate::error::Error;
 use crate::literal;
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
 use logos::Logos;
 use std::iter::once;
 
-pub type Error = Rich<'static, Token>;
-
-type Extra<'tok> = extra::Err<Rich<'tok, Token>>;
+type Extra = extra::Err<Error>;
 
 /// 式を解析する
 pub fn parse_expr(src: &str) -> (Option<Expr>, Vec<Error>) {
-    let tokens: Vec<(Token, Span)> = Token::lexer(src)
+    let lexed: Vec<_> = Token::lexer(src)
         .spanned()
-        .map(|(token, span)| (token.unwrap_or(Token::Error), span.into()))
+        .map(|(token, span)| (token, Span::from(span)))
         .collect();
-    let lex_errors = tokens
+    let tokens: Vec<(Token, Span)> = lexed
         .iter()
-        .filter(|(token, _)| *token == Token::Error)
-        .map(|(_, span)| Rich::custom(*span, "invalid token"));
+        .map(|&(token, span)| (token.unwrap_or(Token::Error), span))
+        .collect();
+    let lex_errors = lexed.iter().filter_map(|&(token, span)| {
+        token.err().map(|error| Error {
+            span,
+            kind: error.into(),
+        })
+    });
     let eoi = Span::from(src.len()..src.len());
     let (expr, parse_errors) = expr(src)
         .then_ignore(end())
         .parse(tokens.as_slice().map(eoi, |(token, span)| (token, span)))
         .into_output_errors();
-    let errors = lex_errors
-        .chain(parse_errors.into_iter().map(Rich::into_owned))
-        .collect();
-    (expr, errors)
+    (expr, lex_errors.chain(parse_errors).collect())
 }
 
-fn expr<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, Expr, Extra<'tok>> + Clone
+fn expr<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, Expr, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
@@ -53,8 +55,11 @@ where
             let span: Span = e.span();
             literal::decode(token, &src[span.into_range()])
                 .map(ExprKind::Lit)
-                .unwrap_or_else(|message| {
-                    emitter.emit(Rich::custom(span, message));
+                .unwrap_or_else(|error| {
+                    emitter.emit(Error {
+                        span,
+                        kind: error.into(),
+                    });
                     ExprKind::Error
                 })
         });
@@ -140,7 +145,7 @@ where
     })
 }
 
-fn path<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, Path, Extra<'tok>> + Clone
+fn path<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, Path, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {

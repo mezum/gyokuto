@@ -54,7 +54,8 @@ impl<'a, I: Input<'a, Token = Token, Span = Span>> chumsky::error::Error<'a, I> 
         if let (ErrorKind::Syntax { expected, .. }, ErrorKind::Syntax { expected: more, .. }) =
             (&mut self.kind, other.kind)
         {
-            expected.extend(more.into_iter().filter(|e| !expected.contains(e)));
+            let more: Vec<_> = more.into_iter().filter(|e| !expected.contains(e)).collect();
+            expected.extend(more);
         }
         self
     }
