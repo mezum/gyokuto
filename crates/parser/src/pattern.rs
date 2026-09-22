@@ -29,24 +29,7 @@ where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
     recursive(move |pattern| {
-        let no_top_in = no_top_in(src, expr, block_like, pattern);
-        let no_top = recursive(|no_top| {
-            just(Token::Mut)
-                .or_not()
-                .map(|m| m.is_some())
-                .then(ident(src))
-                .then_ignore(just(Token::In))
-                .then(no_top)
-                .map_with(|((mutable, name), sub), e| Pat {
-                    kind: PatKind::Ident {
-                        mutable,
-                        name,
-                        sub: Some(Box::new(sub)),
-                    },
-                    span: e.span(),
-                })
-                .or(no_top_in)
-        });
+        let no_top = no_top(src, expr, block_like, pattern);
         no_top
             .clone()
             .then(
@@ -62,6 +45,36 @@ where
                     span: e.span(),
                 },
             })
+    })
+}
+
+/// 最上位に `|` を含まないパターン (PatternNoTop) を解析する。内側のパターンは `pattern` で解析する
+pub(crate) fn no_top<'tok, 'src: 'tok, I>(
+    src: &'src str,
+    expr: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
+    block_like: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
+    pattern: impl Parser<'tok, I, Pat, Extra> + Clone + 'tok,
+) -> impl Parser<'tok, I, Pat, Extra> + Clone
+where
+    I: ValueInput<'tok, Token = Token, Span = Span>,
+{
+    let no_top_in = no_top_in(src, expr, block_like, pattern);
+    recursive(|no_top| {
+        just(Token::Mut)
+            .or_not()
+            .map(|m| m.is_some())
+            .then(ident(src))
+            .then_ignore(just(Token::In))
+            .then(no_top)
+            .map_with(|((mutable, name), sub), e| Pat {
+                kind: PatKind::Ident {
+                    mutable,
+                    name,
+                    sub: Some(Box::new(sub)),
+                },
+                span: e.span(),
+            })
+            .or(no_top_in)
     })
 }
 
@@ -245,7 +258,9 @@ where
         .or(simple)
 }
 
-fn ident<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, String, Extra> + Clone
+pub(crate) fn ident<'tok, 'src: 'tok, I>(
+    src: &'src str,
+) -> impl Parser<'tok, I, String, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {

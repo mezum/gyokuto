@@ -136,6 +136,62 @@ pub enum StmtKind {
     Semi(Expr),
     /// `;` を付けないブロック様の式
     Expr(Expr),
+    Item(Item),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Item {
+    pub kind: ItemKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ItemKind {
+    Fn {
+        sig: FnSig,
+        body: Block,
+    },
+    /// `extern fn f(..);`
+    ExternFn(FnSig),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FnSig {
+    pub name: String,
+    pub generics: Vec<GenericParam>,
+    pub self_param: Option<SelfParam>,
+    pub params: Vec<Param>,
+    /// 無い場合はユニット型
+    pub ret: Option<Type>,
+    pub where_preds: Vec<WherePred>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GenericParam {
+    /// `T: A + B`
+    Type { name: String, bounds: Vec<Path> },
+    /// `const N: T`
+    Const { name: String, ty: Type },
+}
+
+/// `where` の `T: A + B`
+#[derive(Debug, Clone, PartialEq)]
+pub struct WherePred {
+    pub ty: Type,
+    pub bounds: Vec<Path>,
+}
+
+/// `self` / `mut self` / `&self` / `&mut self`
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelfParam {
+    Value { mutable: bool },
+    Ref { mutable: bool },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Param {
+    pub pat: Pat,
+    pub ty: Type,
 }
 
 #[derive(Debug, Clone, PartialEq)]

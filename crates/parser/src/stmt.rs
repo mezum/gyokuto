@@ -1,17 +1,41 @@
-use crate::ast::{Block, Expr, Pat, Span, Stmt, StmtKind};
+use crate::ast::{Block, Expr, Item, Pat, Span, Stmt, StmtKind};
 use crate::control::has_bare_block_like;
 use crate::error::{Error, ErrorKind};
+use crate::item::item;
 use crate::parser::Extra;
 use crate::types::ty;
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
 
-/// ブロック `{ ... }` を解析する。文の先頭のブロック様の式には `block_like`、`let` の左辺には `pattern` を使う
+/// ブロック `{ ... }` を解析する。文の先頭のブロック様の式には `block_like`、`let` と項目の引数の左辺には `pattern` を使う
 pub(crate) fn block<'tok, 'src: 'tok, I>(
     src: &'src str,
     expr: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
     block_like: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
     pattern: impl Parser<'tok, I, Pat, Extra> + Clone + 'tok,
+) -> impl Parser<'tok, I, Block, Extra> + Clone
+where
+    I: ValueInput<'tok, Token = Token, Span = Span>,
+{
+    recursive(move |block| {
+        let item = item(
+            src,
+            expr.clone(),
+            block_like.clone(),
+            block,
+            pattern.clone(),
+        );
+        block_with(src, expr, block_like, pattern, item)
+    })
+}
+
+/// ブロックを解析する。文の項目は `item` で解析する
+fn block_with<'tok, 'src: 'tok, I>(
+    src: &'src str,
+    expr: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
+    block_like: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
+    pattern: impl Parser<'tok, I, Pat, Extra> + Clone + 'tok,
+    item: impl Parser<'tok, I, Item, Extra> + Clone + 'tok,
 ) -> impl Parser<'tok, I, Block, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
@@ -49,6 +73,7 @@ where
             }
         });
     let stmt = choice((
+        item.map(StmtKind::Item),
         let_stmt,
         block_like.map(StmtKind::Expr),
         expr.then(choice((
@@ -172,6 +197,25 @@ mod tests {
     #[case("{ { a } b; }", "(block (expr (block a)) (semi b))")]
     fn block_like_stmt(#[case] src: &str, #[case] expected: &str) {
         assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("{ fn f() {} }", "(block (fn f (params) (block)))")]
+    #[case("{ fn f() {} f() }", "(block (fn f (params) (block)) (call f))")]
+    #[case("{ extern fn f(); }", "(block (extern fn f (params)))")]
+    #[case(
+        "{ fn f() { fn g() {} } }",
+        "(block (fn f (params) (block (fn g (params) (block)))))"
+    )]
+    fn item_stmt(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("{ fn f() {}; }")]
+    #[case("{ a fn f() {} }")]
+    fn invalid_item_stmt(#[case] src: &str) {
+        assert!(!parse_expr(src).1.is_empty());
     }
 
     #[rstest]

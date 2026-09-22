@@ -96,6 +96,8 @@ pub enum Token {
     Else,
     #[token("enum")]
     Enum,
+    #[token("extern")]
+    Extern,
     #[token("false")]
     False,
     #[token("fn")]
@@ -396,6 +398,7 @@ mod tests {
     #[case("dyn", Token::Dyn)]
     #[case("else", Token::Else)]
     #[case("enum", Token::Enum)]
+    #[case("extern", Token::Extern)]
     #[case("false", Token::False)]
     #[case("fn", Token::Fn)]
     #[case("for", Token::For)]
