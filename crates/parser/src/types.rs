@@ -24,17 +24,20 @@ where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
     recursive(|ty| {
-        let mut no_bounds = Recursive::declare();
         let types = ty
             .clone()
             .separated_by(just(Token::Comma))
             .allow_trailing()
             .collect::<Vec<_>>()
             .delimited_by(just(Token::LParen), just(Token::RParen));
-        let ret = just(Token::Arrow)
-            .ignore_then(no_bounds.clone())
-            .or_not()
-            .map(|ret: Option<Type>| ret.map(Box::new));
+        let signature = |no_bounds| {
+            types.clone().then(
+                just(Token::Arrow)
+                    .ignore_then(no_bounds)
+                    .or_not()
+                    .map(|ret: Option<Type>| ret.map(Box::new)),
+            )
+        };
 
         let lit = literal(src).map_with(|kind, e| Expr {
             kind,
@@ -62,30 +65,23 @@ where
             lit.or(neg_lit).map(GenericArg::Const),
             ty.clone().map(GenericArg::Type),
         ));
-        let args = arg
+        let angle_args = arg
             .separated_by(just(Token::Comma))
             .allow_trailing()
             .collect()
             .delimited_by(just(Token::Lt), just(Token::Gt))
-            .map(GenericArgs::Angle)
-            .or(types
-                .clone()
-                .then(ret.clone())
-                .map(|(inputs, output)| GenericArgs::Paren { inputs, output }));
-        let type_path = path(src, args.or_not()).map(|segments| TypePath {
-            segments: segments
-                .into_iter()
-                .map(|(segment, args)| TypePathSegment { segment, args })
-                .collect(),
-        });
-
-        let reference = just(Token::Amp)
-            .ignore_then(just(Token::Mut).or_not())
-            .then(no_bounds.clone())
-            .map(|(mutable, ty)| TypeKind::Ref {
-                mutable: mutable.is_some(),
-                ty: Box::new(ty),
-            });
+            .map(GenericArgs::Angle);
+        let type_path = |no_bounds| {
+            let args =
+                angle_args.clone().or(signature(no_bounds)
+                    .map(|(inputs, output)| GenericArgs::Paren { inputs, output }));
+            path(src, args.or_not()).map(|segments| TypePath {
+                segments: segments
+                    .into_iter()
+                    .map(|(segment, args)| TypePathSegment { segment, args })
+                    .collect(),
+            })
+        };
 
         let rest_items = just(Token::Comma).ignore_then(
             ty.clone()
@@ -116,16 +112,22 @@ where
                 },
             });
 
-        let fn_type = just(Token::Fn)
-            .ignore_then(types)
-            .then(ret)
-            .map(|(params, ret)| TypeKind::Fn { params, ret });
-
         let error = |span| Type {
             kind: TypeKind::Error,
             span,
         };
-        no_bounds.define(
+        let no_bounds = recursive(|no_bounds| {
+            let type_path = type_path(no_bounds.clone());
+            let reference = just(Token::Amp)
+                .ignore_then(just(Token::Mut).or_not())
+                .then(no_bounds.clone())
+                .map(|(mutable, ty)| TypeKind::Ref {
+                    mutable: mutable.is_some(),
+                    ty: Box::new(ty),
+                });
+            let fn_type = just(Token::Fn)
+                .ignore_then(signature(no_bounds))
+                .map(|(params, ret)| TypeKind::Fn { params, ret });
             choice((
                 type_path.clone().map(TypeKind::Path),
                 reference,
@@ -136,7 +138,7 @@ where
                     .ignore_then(type_path.clone())
                     .map(|path| TypeKind::Dyn(vec![path])),
                 just(Token::Impl)
-                    .ignore_then(type_path.clone())
+                    .ignore_then(type_path)
                     .map(|path| TypeKind::Impl(vec![path])),
                 just(Token::Bang).to(TypeKind::Never),
                 just(Token::Underscore).to(TypeKind::Infer),
@@ -162,10 +164,10 @@ where
                     (Token::LBrace, Token::RBrace),
                 ],
                 error,
-            ))),
-        );
+            )))
+        });
 
-        let bounds = type_path
+        let bounds = type_path(no_bounds.clone())
             .separated_by(just(Token::Plus))
             .at_least(1)
             .collect::<Vec<_>>();
