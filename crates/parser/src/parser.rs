@@ -1,8 +1,8 @@
 use crate::ast::{Expr, ExprKind, Lit, Path, PathSegment, Span};
 use chumsky::{input::ValueInput, prelude::*};
+use gyokuto_lexer::Token;
 use logos::Logos;
 use std::iter::once;
-use typed_vm_lexer::Token;
 
 pub type Error = Rich<'static, Token>;
 

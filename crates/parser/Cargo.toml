@@ -1,5 +1,5 @@
 [package]
-name = "typed-vm-parser"
+name = "gyokuto-parser"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,4 +8,4 @@ license.workspace = true
 [dependencies]
 chumsky.workspace = true
 logos.workspace = true
-typed-vm-lexer = { path = "../lexer" }
+gyokuto-lexer = { path = "../lexer" }
