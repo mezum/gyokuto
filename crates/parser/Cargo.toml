@@ -10,3 +10,6 @@ chumsky.workspace = true
 logos.workspace = true
 thiserror.workspace = true
 gyokuto-lexer = { path = "../lexer" }
+
+[dev-dependencies]
+rstest.workspace = true
