@@ -511,10 +511,11 @@ mod tests {
         expr.unwrap().as_sexpr()
     }
 
-    #[test]
-    fn bool_literals() {
-        assert_eq!(parse_ok("true"), "true");
-        assert_eq!(parse_ok("false"), "false");
+    #[rstest]
+    #[case("true", "true")]
+    #[case("false", "false")]
+    fn bool_literal(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
     }
 
     #[test]
@@ -584,22 +585,24 @@ mod tests {
         assert_eq!(expr.unwrap().as_sexpr(), "error");
     }
 
-    #[test]
-    fn parens_and_tuples() {
-        assert_eq!(parse_ok("(a)"), "(paren a)");
-        assert_eq!(parse_ok("()"), "(tuple)");
-        assert_eq!(parse_ok("(a,)"), "(tuple a)");
-        assert_eq!(parse_ok("(a, b)"), "(tuple a b)");
-        assert_eq!(parse_ok("(a, b,)"), "(tuple a b)");
-        assert_eq!(parse_ok("((a))"), "(paren (paren a))");
+    #[rstest]
+    #[case("(a)", "(paren a)")]
+    #[case("()", "(tuple)")]
+    #[case("(a,)", "(tuple a)")]
+    #[case("(a, b)", "(tuple a b)")]
+    #[case("(a, b,)", "(tuple a b)")]
+    #[case("((a))", "(paren (paren a))")]
+    fn paren_or_tuple(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
     }
 
-    #[test]
-    fn arrays() {
-        assert_eq!(parse_ok("[]"), "(array)");
-        assert_eq!(parse_ok("[a, b,]"), "(array a b)");
-        assert_eq!(parse_ok("[a; n]"), "(repeat a n)");
-        assert_eq!(parse_ok("[(a, b), [c]]"), "(array (tuple a b) (array c))");
+    #[rstest]
+    #[case("[]", "(array)")]
+    #[case("[a, b,]", "(array a b)")]
+    #[case("[a; n]", "(repeat a n)")]
+    #[case("[(a, b), [c]]", "(array (tuple a b) (array c))")]
+    fn array(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
     }
 
     #[rstest]
@@ -659,14 +662,15 @@ mod tests {
         assert_eq!(expr.unwrap().as_sexpr(), "(array a error)");
     }
 
-    #[test]
-    fn unary_operators() {
-        assert_eq!(parse_ok("-a"), "(Neg a)");
-        assert_eq!(parse_ok("!a"), "(Not a)");
-        assert_eq!(parse_ok("*a"), "(Deref a)");
-        assert_eq!(parse_ok("&a"), "(Ref a)");
-        assert_eq!(parse_ok("&mut a"), "(RefMut a)");
-        assert_eq!(parse_ok("-!*a"), "(Neg (Not (Deref a)))");
+    #[rstest]
+    #[case("-a", "(Neg a)")]
+    #[case("!a", "(Not a)")]
+    #[case("*a", "(Deref a)")]
+    #[case("&a", "(Ref a)")]
+    #[case("&mut a", "(RefMut a)")]
+    #[case("-!*a", "(Neg (Not (Deref a)))")]
+    fn unary_operator(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
     }
 
     #[test]
@@ -721,18 +725,20 @@ mod tests {
         assert_eq!(parse_ok(src), format!("({op} a b)"));
     }
 
-    #[test]
-    fn left_associative() {
-        assert_eq!(parse_ok("a - b - c"), "(Sub (Sub a b) c)");
-        assert_eq!(parse_ok("a || b || c"), "(Or (Or a b) c)");
+    #[rstest]
+    #[case("a - b - c", "(Sub (Sub a b) c)")]
+    #[case("a || b || c", "(Or (Or a b) c)")]
+    fn left_associative(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
     }
 
-    #[test]
-    fn operators_starting_with_gt_without_spaces() {
-        assert_eq!(parse_ok("a>b"), "(Gt a b)");
-        assert_eq!(parse_ok("a>=b"), "(Ge a b)");
-        assert_eq!(parse_ok("a>>b"), "(Shr a b)");
-        assert_eq!(parse_ok("a>>=b"), "(Shr= a b)");
+    #[rstest]
+    #[case("a>b", "(Gt a b)")]
+    #[case("a>=b", "(Ge a b)")]
+    #[case("a>>b", "(Shr a b)")]
+    #[case("a>>=b", "(Shr= a b)")]
+    fn operator_starting_with_gt_without_spaces(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
     }
 
     #[test]
@@ -814,12 +820,13 @@ mod tests {
         assert_eq!(parse_ok(src), format!("({op}= a b)"));
     }
 
-    #[test]
-    fn assignment_is_right_associative_and_weakest() {
-        assert_eq!(parse_ok("a = b = c"), "(= a (= b c))");
-        assert_eq!(parse_ok("a = b..c"), "(= a (.. b c))");
-        assert_eq!(parse_ok("a += b || c"), "(Add= a (Or b c))");
-        assert_eq!(parse_ok("*a = -b"), "(= (Deref a) (Neg b))");
+    #[rstest]
+    #[case("a = b = c", "(= a (= b c))")]
+    #[case("a = b..c", "(= a (.. b c))")]
+    #[case("a += b || c", "(Add= a (Or b c))")]
+    #[case("*a = -b", "(= (Deref a) (Neg b))")]
+    fn assignment_is_right_associative_and_weakest(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
     }
 
     #[test]
