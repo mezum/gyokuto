@@ -96,6 +96,8 @@ pub enum Token {
     Else,
     #[token("enum")]
     Enum,
+    #[token("extern")]
+    Extern,
     #[token("false")]
     False,
     #[token("fn")]
