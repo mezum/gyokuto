@@ -1,6 +1,11 @@
+use crate::error::LexError;
 use logos::{Lexer, Logos};
 
+/// エラー用パターンの callback の戻り値の型
+type Fail = Result<(), LexError>;
+
 #[derive(Logos, Debug, Clone, Copy, PartialEq, Eq)]
+#[logos(error = LexError)]
 #[logos(skip r"\p{Pattern_White_Space}+")]
 #[logos(skip(r"//[^\n]*", allow_greedy = true))]
 #[logos(skip(r"/\*", callback = block_comment))]
@@ -25,7 +30,7 @@ pub enum Token {
     /// 数値リテラルの直後に無効なサフィックスが続く場合はエラーとする
     #[regex(
         r"((?&dec)(\.(?&dec))?(?&exp)?|(?&hex)|(?&oct)|(?&bin))\p{XID_Continue}+",
-        |_| false,
+        invalid_number,
         priority = 0
     )]
     Int,
@@ -34,22 +39,38 @@ pub enum Token {
     Float,
     #[regex(r"'([^'\\\n\r\t]|(?&esc))'", unicode_escapes_are_valid)]
     /// 閉じていない・不正な内容・直後に識別子の文字が続く文字リテラルはエラーとする
-    #[regex(r"'([^\\\n]|\\.)?([^'\\\n]|\\.)*'?\p{XID_Continue}*", |_| false, priority = 0)]
+    #[regex(
+        r"'([^\\\n]|\\.)?([^'\\\n]|\\.)*'?\p{XID_Continue}*",
+        |_| Fail::Err(LexError::InvalidCharLiteral),
+        priority = 0
+    )]
     Char,
     #[regex(r#""([^"\\\r]|\r\n|(?&esc)|\\\r?\n)*""#, unicode_escapes_are_valid)]
     /// 閉じていない・不正な内容・直後に識別子の文字が続く文字列リテラルはエラーとする
-    #[regex(r#""([^"\\]|\\(.|\n))*("\p{XID_Continue}*)?"#, |_| false, priority = 0)]
+    #[regex(
+        r#""([^"\\]|\\(.|\n))*("\p{XID_Continue}*)?"#,
+        |_| Fail::Err(LexError::InvalidStringLiteral),
+        priority = 0
+    )]
     Str,
     #[regex(r"b'([\x00-\x7F&&[^'\\\n\r\t]]|(?&byte_esc))'")]
     /// 閉じていない・不正な内容・直後に識別子の文字が続くバイト文字リテラルはエラーとする
-    #[regex(r"b'([^\\\n]|\\.)?([^'\\\n]|\\.)*'?\p{XID_Continue}*", |_| false, priority = 0)]
+    #[regex(
+        r"b'([^\\\n]|\\.)?([^'\\\n]|\\.)*'?\p{XID_Continue}*",
+        |_| Fail::Err(LexError::InvalidByteLiteral),
+        priority = 0
+    )]
     Byte,
     #[regex(
         r#"b"([^"\\\r]|\r\n|(?&byte_esc)|(?&esc)|\\\r?\n)*""#,
         unicode_escapes_are_valid
     )]
     /// 閉じていない・不正な内容・直後に識別子の文字が続くバイト文字列リテラルはエラーとする
-    #[regex(r#"b"([^"\\]|\\(.|\n))*("\p{XID_Continue}*)?"#, |_| false, priority = 0)]
+    #[regex(
+        r#"b"([^"\\]|\\(.|\n))*("\p{XID_Continue}*)?"#,
+        |_| Fail::Err(LexError::InvalidByteStringLiteral),
+        priority = 0
+    )]
     ByteStr,
     #[regex(r##"r#*""##, raw_string)]
     RawStr,
@@ -221,8 +242,44 @@ pub enum Token {
     RBrace,
 }
 
+/// 数値リテラルとして読めなかった並びから、エラーの原因を判別する
+fn invalid_number(lex: &mut Lexer<Token>) -> Result<(), LexError> {
+    let text = lex.slice();
+    let digits_of = |radix: u32| move |c: char| c == '_' || c.is_digit(radix);
+    let prefixed = [("0x", 16), ("0o", 8), ("0b", 2)]
+        .into_iter()
+        .find_map(|(prefix, radix)| text.strip_prefix(prefix).map(|rest| (radix, rest)));
+    Err(match prefixed {
+        Some((radix, rest)) => {
+            let after = rest.trim_start_matches(digits_of(radix));
+            let has_digits = rest[..rest.len() - after.len()].contains(|c: char| c != '_');
+            match (has_digits, after.starts_with(|c: char| c.is_ascii_digit())) {
+                (_, true) => LexError::InvalidDigit,
+                (false, false) => LexError::MissingDigits,
+                (true, false) => LexError::InvalidNumberSuffix,
+            }
+        }
+        None => {
+            let after = text.trim_start_matches(digits_of(10));
+            let after = after
+                .strip_prefix('.')
+                .map_or(after, |fraction| fraction.trim_start_matches(digits_of(10)));
+            let exponent_has_digits = |exponent: &str| {
+                exponent
+                    .trim_start_matches(['+', '-'])
+                    .trim_start_matches('_')
+                    .starts_with(|c: char| c.is_ascii_digit())
+            };
+            match after.strip_prefix(['e', 'E']) {
+                Some(exponent) if !exponent_has_digits(exponent) => LexError::MissingExponentDigits,
+                _ => LexError::InvalidNumberSuffix,
+            }
+        }
+    })
+}
+
 /// `\u{...}` の値が Unicode スカラー値であるか検査する
-fn unicode_escapes_are_valid(lex: &mut Lexer<Token>) -> bool {
+fn unicode_escapes_are_valid(lex: &mut Lexer<Token>) -> Result<(), LexError> {
     // 先に `\\` で分割し、エスケープされた `\` の後の `u{` を誤検出しないようにする
     lex.slice()
         .split(r"\\")
@@ -238,18 +295,20 @@ fn unicode_escapes_are_valid(lex: &mut Lexer<Token>) -> bool {
                 .and_then(char::from_u32)
                 .is_some()
         })
+        .then_some(())
+        .ok_or(LexError::InvalidUnicodeEscape)
 }
 
 /// raw 文字列を、開始と同じ数の `#` が `"` の後に続く終端まで読み進める
 ///
 /// `#` の数をそろえる処理は正規表現で表現できないため、開始部分以降をここで扱う
-fn raw_string(lex: &mut Lexer<Token>) -> bool {
+fn raw_string(lex: &mut Lexer<Token>) -> Result<(), LexError> {
     let hashes = lex.slice().matches('#').count();
     let terminator = format!("\"{}", "#".repeat(hashes));
     let remainder = lex.remainder();
     let Some(end) = remainder.find(&terminator) else {
         lex.bump(remainder.len());
-        return false;
+        return Err(LexError::UnterminatedRawString);
     };
     let has_bare_cr = remainder[..end].replace("\r\n", "").contains('\r');
     let suffix_len: usize = remainder[end + terminator.len()..]
@@ -258,13 +317,20 @@ fn raw_string(lex: &mut Lexer<Token>) -> bool {
         .map(char::len_utf8)
         .sum();
     lex.bump(end + terminator.len() + suffix_len);
-    hashes <= 255 && !has_bare_cr && suffix_len == 0
+    [
+        (hashes > 255, LexError::TooManyRawStringHashes),
+        (has_bare_cr, LexError::BareCarriageReturn),
+        (suffix_len > 0, LexError::ReservedLiteralSuffix),
+    ]
+    .into_iter()
+    .find_map(|(failed, error)| failed.then_some(error))
+    .map_or(Ok(()), Err)
 }
 
 /// ブロックコメントを、ネストの深さを数えて対応する `*/` まで読み飛ばす
 ///
 /// ネストの対応は正規表現で表現できないため、開始部分以降をここで扱う
-fn block_comment(lex: &mut Lexer<Token>) -> Result<(), ()> {
+fn block_comment(lex: &mut Lexer<Token>) -> Result<(), LexError> {
     let remainder = lex.remainder().as_bytes();
     let mut depth = 1;
     let mut i = 0;
@@ -276,7 +342,7 @@ fn block_comment(lex: &mut Lexer<Token>) -> Result<(), ()> {
             Some(_) => i += 2,
             None => {
                 lex.bump(remainder.len());
-                return Err(());
+                return Err(LexError::UnterminatedBlockComment);
             }
         }
     }
@@ -287,7 +353,6 @@ fn block_comment(lex: &mut Lexer<Token>) -> Result<(), ()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::LexError;
     use std::ops::Range;
 
     fn lex(src: &str) -> Vec<(Result<Token, LexError>, Range<usize>)> {
