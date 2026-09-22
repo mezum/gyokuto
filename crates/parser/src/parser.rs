@@ -1,3 +1,80 @@
+use crate::ast::{Expr, ExprKind, Lit, Path, PathSegment, Span};
+use chumsky::{input::ValueInput, prelude::*};
+use logos::Logos;
+use typed_vm_lexer::Token;
+
+pub type Error = Rich<'static, Token>;
+
+type Extra<'tok> = extra::Err<Rich<'tok, Token>>;
+
+/// 式を解析する
+pub fn parse_expr(src: &str) -> (Option<Expr>, Vec<Error>) {
+    let tokens: Vec<(Token, Span)> = Token::lexer(src)
+        .spanned()
+        .map(|(token, span)| (token.unwrap_or(Token::Error), span.into()))
+        .collect();
+    let lex_errors = tokens
+        .iter()
+        .filter(|(token, _)| *token == Token::Error)
+        .map(|(_, span)| Rich::custom(*span, "invalid token"));
+    let eoi = Span::from(src.len()..src.len());
+    let (expr, parse_errors) = expr(src)
+        .then_ignore(end())
+        .parse(tokens.as_slice().map(eoi, |(token, span)| (token, span)))
+        .into_output_errors();
+    let errors = lex_errors
+        .chain(parse_errors.into_iter().map(Rich::into_owned))
+        .collect();
+    (expr, errors)
+}
+
+fn expr<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, Expr, Extra<'tok>> + Clone
+where
+    I: ValueInput<'tok, Token = Token, Span = Span>,
+{
+    let lit = select! {
+        Token::True => Lit::Bool(true),
+        Token::False => Lit::Bool(false),
+    };
+    choice((
+        lit.map(ExprKind::Lit),
+        path(src).map(ExprKind::Path),
+        just(Token::Error).to(ExprKind::Error),
+    ))
+    .map_with(|kind, e| Expr {
+        kind,
+        span: e.span(),
+    })
+}
+
+fn path<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, Path, Extra<'tok>> + Clone
+where
+    I: ValueInput<'tok, Token = Token, Span = Span>,
+{
+    let ident = just(Token::Ident)
+        .to_span()
+        .map(move |span: Span| PathSegment::Ident(src[span.into_range()].to_string()));
+    let head = choice((
+        just(Token::Crate).to(vec![PathSegment::Crate]),
+        just(Token::SelfValue).to(vec![PathSegment::SelfValue]),
+        just(Token::SelfType).to(vec![PathSegment::SelfType]),
+        just(Token::Super)
+            .to(PathSegment::Super)
+            .separated_by(just(Token::ColonColon))
+            .at_least(1)
+            .collect(),
+        ident.map(|segment| vec![segment]),
+    ));
+    let rest = just(Token::ColonColon)
+        .ignore_then(ident)
+        .repeated()
+        .collect::<Vec<_>>();
+    head.then(rest).map(|(mut segments, rest)| {
+        segments.extend(rest);
+        Path { segments }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
