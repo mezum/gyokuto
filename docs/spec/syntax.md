@@ -210,7 +210,7 @@ UnaryExpr  ::= ( '-' | '!' | '*' | '&' | '&' 'mut' ) UnaryExpr
 ## 文
 
 ```ebnf
-Stmt          ::= LetStmt | ExprStmt
+Stmt          ::= LetStmt | ExprStmt | Item
 LetStmt       ::= 'let' Pattern ( ':' Type )? ( '=' Expr | '=' CondExpr 'else' BlockExpr )? ';'
 ExprStmt      ::= Expr ';'
                 | BlockLikeExpr
@@ -231,6 +231,45 @@ BlockLikeExpr ::= BlockExpr | IfExpr | LoopExpr | WhileExpr | ForExpr | MatchExp
   - 値を使う場合は `let` で束縛するか、`({ a }) - 1` のように括弧で囲む
   - 文の値が `()` であるかは型検査で検査する
   - ブロックの末尾に置いた場合は、ブロックの値となる
+- ブロックの中の項目は、ブロック全体から参照できる
+  - 項目の中からは、外側の関数の変数を参照できない
+
+## 項目
+
+```ebnf
+Module        ::= Item*
+Item          ::= FnItem | ExternItem
+FnItem        ::= FnSig BlockExpr
+ExternItem    ::= 'extern' FnSig ';'
+                | 'extern' StructItem
+FnSig         ::= 'fn' IDENT GenericParams? '(' FnParams? ')' ( '->' Type )? WhereClause?
+FnParams      ::= SelfParam ( ',' Param )* ','?
+                | Param ( ',' Param )* ','?
+SelfParam     ::= 'mut'? 'self' | '&' 'mut'? 'self'
+Param         ::= PatternNoTop ':' Type
+GenericParams ::= '<' ( GenericParam ( ',' GenericParam )* ','? )? '>'
+GenericParam  ::= IDENT ( ':' TypeBounds )?
+                | 'const' IDENT ':' Type
+WhereClause   ::= 'where' ( WherePred ( ',' WherePred )* ','? )?
+WherePred     ::= Type ':' TypeBounds
+```
+
+- 1 つのファイルを 1 つのモジュール (Module) とし、項目を並べる
+- 関数の引数と戻り値の型は省略できない
+  - `->` を省略した場合、戻り値の型はユニット型となる
+- 引数の左辺はパターンとする (`(a, b): (i32, i32)`)
+  - パターンが必ず一致するか (反駁不能か) は型検査で検査する
+- `self` の引数は先頭にのみ置ける
+  - `self` / `mut self` は値、`&self` / `&mut self` は参照で受け取る
+  - `impl` / `trait` の外で使っているかは名前解決で検査する
+- ジェネリクスの引数は型引数 (`T: A + B`) と定数引数 (`const N: usize`) とする
+  - 定数引数の型は数値に限らない (`const S: &str`)
+  - 型引数の既定値は持たない
+- `where` は境界をジェネリクスの引数の外に書く (`where T: A + B, Vec<T>: C`)
+- `extern` はホストが登録する関数・型を宣言する
+  - 関数は本体の代わりに `;` を置く (`extern fn log(msg: &str);`)
+  - 型は構造体の定義に `extern` を前置する (`extern struct Foo { ... }`)。StructItem は構造体の仕様で定める
+  - 宣言とホストが登録したものが一致するかは、ホストとの連携時に検査する
 
 ## パターン
 
