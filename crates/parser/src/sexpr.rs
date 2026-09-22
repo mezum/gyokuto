@@ -152,10 +152,15 @@ impl AsSexpr for Pat {
                 end,
                 inclusive,
             } => range(start, end, *inclusive),
+            PatKind::Ref { mutable, pat } => {
+                list(if *mutable { "&mut" } else { "&" }, [pat.as_sexpr()])
+            }
             PatKind::Paren(pat) => list("paren", [pat.as_sexpr()]),
             PatKind::Tuple(pats) => list("tuple", sexprs(pats)),
+            PatKind::Slice(pats) => list("slice", sexprs(pats)),
             PatKind::Path(path) => path.as_sexpr(),
             PatKind::Or(pats) => list("|", sexprs(pats)),
+            PatKind::Error => "error".to_string(),
         }
     }
 }

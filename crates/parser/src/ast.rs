@@ -152,11 +152,18 @@ pub enum PatKind {
         end: Option<Box<Expr>>,
         inclusive: bool,
     },
+    Ref {
+        mutable: bool,
+        pat: Box<Pat>,
+    },
     Paren(Box<Pat>),
     Tuple(Vec<Pat>),
+    Slice(Vec<Pat>),
     Path(Path),
     /// `a | b`
     Or(Vec<Pat>),
+    /// 構文エラーから回復した箇所
+    Error,
 }
 
 #[derive(Debug, Clone, PartialEq)]

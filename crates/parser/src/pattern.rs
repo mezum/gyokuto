@@ -115,7 +115,7 @@ where
         .allow_trailing()
         .collect::<Vec<_>>();
     let parens = pattern
-        .then(just(Token::Comma).ignore_then(items).or_not())
+        .then(just(Token::Comma).ignore_then(items.clone()).or_not())
         .or_not()
         .delimited_by(just(Token::LParen), just(Token::RParen))
         .map(|inner| match inner {
@@ -123,6 +123,9 @@ where
             Some((first, None)) => PatKind::Paren(Box::new(first)),
             Some((first, Some(rest))) => PatKind::Tuple(once(first).chain(rest).collect()),
         });
+    let slice = items
+        .delimited_by(just(Token::LBracket), just(Token::RBracket))
+        .map(PatKind::Slice);
     let binding = path.map(|path| match &path.segments[..] {
         [segment] if segment.args.is_none() => match &segment.name {
             PathName::Ident(name) => PatKind::Ident {
@@ -135,23 +138,49 @@ where
         _ => PatKind::Path(path),
     });
 
-    let simple = choice((
-        just(Token::Underscore).to(PatKind::Wild),
-        just(Token::DotDot).to(PatKind::Rest),
-        signed_literal(src).map(PatKind::Lit),
-        parens,
-        just(Token::Mut)
-            .ignore_then(ident(src))
-            .map(|name| PatKind::Ident {
-                mutable: true,
-                name,
-                sub: None,
-            }),
-        binding,
-    ))
-    .map_with(|kind, e| Pat {
-        kind,
-        span: e.span(),
+    let error = |span| Pat {
+        kind: PatKind::Error,
+        span,
+    };
+    let simple = recursive(|simple| {
+        choice((
+            just(Token::Underscore).to(PatKind::Wild),
+            just(Token::DotDot).to(PatKind::Rest),
+            signed_literal(src).map(PatKind::Lit),
+            just(Token::Amp)
+                .ignore_then(just(Token::Mut).or_not().map(|m| m.is_some()))
+                .then(simple)
+                .map(|(mutable, pat)| PatKind::Ref {
+                    mutable,
+                    pat: Box::new(pat),
+                }),
+            parens,
+            slice,
+            just(Token::Mut)
+                .ignore_then(ident(src))
+                .map(|name| PatKind::Ident {
+                    mutable: true,
+                    name,
+                    sub: None,
+                }),
+            binding,
+        ))
+        .map_with(|kind, e| Pat {
+            kind,
+            span: e.span(),
+        })
+        .recover_with(via_parser(nested_delimiters(
+            Token::LParen,
+            Token::RParen,
+            [(Token::LBracket, Token::RBracket)],
+            error,
+        )))
+        .recover_with(via_parser(nested_delimiters(
+            Token::LBracket,
+            Token::RBracket,
+            [(Token::LParen, Token::RParen)],
+            error,
+        )))
     });
     range
         .map_with(|kind, e| Pat {
