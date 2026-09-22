@@ -121,8 +121,17 @@ where
                 where_preds,
             },
         );
-    sig.then(block).map_with(|(sig, body), e| Item {
-        kind: ItemKind::Fn { sig, body },
+    choice((
+        sig.clone()
+            .then(block)
+            .map(|(sig, body)| ItemKind::Fn { sig, body }),
+        just(Token::Extern)
+            .ignore_then(sig)
+            .then_ignore(just(Token::Semi))
+            .map(ItemKind::ExternFn),
+    ))
+    .map_with(|kind, e| Item {
+        kind,
         span: e.span(),
     })
 }
@@ -252,7 +261,10 @@ mod tests {
 
     #[rstest]
     #[case("extern fn f();", "(extern fn f (params))")]
-    #[case("extern fn log(msg: &str);", "(extern fn log (params (: msg (& str))))")]
+    #[case(
+        "extern fn log(msg: &str);",
+        "(extern fn log (params (: msg (& str))))"
+    )]
     #[case(
         "extern fn f<T>(x: T) -> T where T: A;",
         "(extern fn f (generics T) (params (: x T)) (-> T) (where (: T A)))"

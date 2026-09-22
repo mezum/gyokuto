@@ -136,6 +136,7 @@ pub enum StmtKind {
     Semi(Expr),
     /// `;` を付けないブロック様の式
     Expr(Expr),
+    Item(Item),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -146,7 +147,12 @@ pub struct Item {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ItemKind {
-    Fn { sig: FnSig, body: Block },
+    Fn {
+        sig: FnSig,
+        body: Block,
+    },
+    /// `extern fn f(..);`
+    ExternFn(FnSig),
 }
 
 #[derive(Debug, Clone, PartialEq)]
