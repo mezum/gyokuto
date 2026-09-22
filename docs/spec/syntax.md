@@ -87,10 +87,15 @@ BlockExpr ::= '{' Stmt* Expr? '}'
 ### 制御式
 
 ```ebnf
-IfExpr       ::= 'if' CondExpr BlockExpr ( 'else' ( BlockExpr | IfExpr ) )?
+IfExpr       ::= 'if' Cond BlockExpr ( 'else' ( BlockExpr | IfExpr ) )?
 LoopExpr     ::= 'loop' BlockExpr
-WhileExpr    ::= 'while' CondExpr BlockExpr
-ForExpr      ::= 'for' IDENT 'in' CondExpr BlockExpr
+WhileExpr    ::= 'while' Cond BlockExpr
+ForExpr      ::= 'for' PatternNoTopIn 'in' CondExpr BlockExpr
+MatchExpr    ::= 'match' CondExpr '{' ( MatchArm ( ',' MatchArm )* ','? )? '}'
+MatchArm     ::= Pattern ( 'if' Expr )? '=>' Expr
+Cond         ::= CondExpr | LetChain
+LetChain     ::= CondOperand ( '&&' CondOperand )*
+CondOperand  ::= 'let' Pattern '=' CmpExpr | CmpExpr
 CondExpr     ::= Expr
 BreakExpr    ::= 'break' Expr?
 ContinueExpr ::= 'continue'
@@ -105,7 +110,16 @@ ReturnExpr   ::= 'return' Expr?
   - 各分岐の値の型が一致するかは型検査で検査する
 - `loop` の値は `break` の値とし、`while` / `for` の値は `()` とする
   - 値付きの `break` は `loop` の中でのみ使える。構文上はどのループでも受理し、型検査で検査する
-- `for` の左辺はパターンを定めるまで識別子のみとする
+- `if` / `while` の条件には、`let` を `&&` で連ねられる (`if let Some(x) = a && x > 0 { ... }`)
+  - `let` はパターンに一致した場合に真となり、束縛した変数は後の条件と本体で使える
+  - `let` を含む条件では `&&` 以外の論理演算子を最上位に置けない。`||` などは括弧で囲む
+  - `let` の右辺と、`let` と連ねる条件は比較演算子までの式 (CmpExpr) とする。`&&` `||` `..` `=` を使う場合は括弧で囲む
+  - 条件式 (CondExpr) と同じく、括弧の外にブロック様の式を書けない
+- `for` の左辺のパターンは、最上位に `in` による束縛 (`x in pat`) と `|` を書けない。書く場合は括弧で囲む
+- `match` の値は、最初に一致したアームの式の値とする
+  - アームは本体がブロック様の式であっても常に `,` で区切る。最後のアームの後の `,` は省略できる
+  - `if` のガードは、パターンに一致した上で真となる場合にのみアームを選ぶ
+  - アームが網羅的であるかは型検査で検査する
 - `break` / `continue` はもっとも内側のループを対象とする。ラベルは無い
   - ループの外で使っているかは型検査で検査する
 - `break` / `continue` / `return` は発散し、型は `!` となる
@@ -197,14 +211,17 @@ UnaryExpr  ::= ( '-' | '!' | '*' | '&' | '&' 'mut' ) UnaryExpr
 
 ```ebnf
 Stmt          ::= LetStmt | ExprStmt
-LetStmt       ::= 'let' 'mut'? IDENT ( ':' Type )? ( '=' Expr )? ';'
+LetStmt       ::= 'let' Pattern ( ':' Type )? ( '=' Expr | '=' CondExpr 'else' BlockExpr )? ';'
 ExprStmt      ::= Expr ';'
                 | BlockLikeExpr
-BlockLikeExpr ::= BlockExpr | IfExpr | LoopExpr | WhileExpr | ForExpr
+BlockLikeExpr ::= BlockExpr | IfExpr | LoopExpr | WhileExpr | ForExpr | MatchExpr
 ```
 
-- `let` は変数を導入する
+- `let` はパターンで変数を導入する
   - `mut` を付けた変数のみ再代入できる。再代入の検査は型検査で行う
+  - `else` が無い場合、パターンが必ず一致するか (反駁不能か) は型検査で検査する
+  - `else` がある場合、パターンに一致しなければ `else` のブロックを実行する。ブロックが発散する (型が `!` である) かは型検査で検査する
+  - `else` がある場合の初期化の式は、条件式 (CondExpr) と同じく括弧の外にブロック様の式を書けない
   - 型を省略した場合は初期化の式から推論する
   - 初期化の式を省略した場合、使用前に必ず代入されているかは型検査で検査する
   - 同じ名前の `let` はそれまでの変数を隠す (shadowing)
@@ -214,6 +231,52 @@ BlockLikeExpr ::= BlockExpr | IfExpr | LoopExpr | WhileExpr | ForExpr
   - 値を使う場合は `let` で束縛するか、`({ a }) - 1` のように括弧で囲む
   - 文の値が `()` であるかは型検査で検査する
   - ブロックの末尾に置いた場合は、ブロックの値となる
+
+## パターン
+
+```ebnf
+Pattern        ::= PatternNoTop ( '|' PatternNoTop )*
+PatternNoTop   ::= PatternNoTopIn | BindingPattern
+PatternNoTopIn ::= LiteralPattern | RangePattern | IdentPattern | WildcardPattern | RestPattern
+                 | RefPattern | TuplePattern | ParenPattern | SlicePattern
+                 | PathPattern | TupleStructPattern | StructPattern
+BindingPattern ::= 'mut'? IDENT 'in' PatternNoTop
+IdentPattern   ::= 'mut'? IDENT
+WildcardPattern ::= '_'
+RestPattern    ::= '..'
+LiteralPattern ::= '-'? LiteralExpr
+RangePattern   ::= RangeBound ( '..' | '..=' ) RangeBound
+                 | RangeBound '..'
+                 | '..=' RangeBound
+RangeBound     ::= '-'? LiteralExpr | PathExpr
+RefPattern     ::= '&' 'mut'? PatternNoTopIn
+TuplePattern   ::= '(' ')'
+                 | '(' Pattern ',' ( Pattern ( ',' Pattern )* ','? )? ')'
+ParenPattern   ::= '(' Pattern ')'
+SlicePattern   ::= '[' ( Pattern ( ',' Pattern )* ','? )? ']'
+PathPattern    ::= PathExpr
+TupleStructPattern ::= PathExpr '(' ( Pattern ( ',' Pattern )* ','? )? ')'
+StructPattern  ::= PathExpr '{' ( FieldPattern ( ',' FieldPattern )* ( ',' '..' )? ','? | '..' )? '}'
+FieldPattern   ::= IDENT ':' Pattern | 'mut'? IDENT
+```
+
+- `|` はいずれかのパターンに一致することを表す
+  - 各選択肢で束縛する変数の名前と型が一致するかは型検査で検査する
+- 単独の識別子は変数の束縛として解析する
+  - 定数やユニットのバリアントを指すかは名前解決で決める
+- `x in pat` はパターン `pat` に一致した値を `x` に束縛する (`n in 1..=9`)
+- `_` はどの値にも一致し、束縛しない
+- `..` は、タプル・スライス・タプル構造体のパターンで残りの要素に一致する
+  - それ以外の位置に置いた場合と、1 つのパターンに 2 回以上置いた場合は型検査でエラーとする
+  - スライスのパターンでは `rest in ..` で残りの要素をスライスとして束縛できる
+- 範囲のパターンは端点に定数を書く (`1..=9`、`'a'..='z'`、`MIN..0`)
+  - 端点の値の範囲や大小の検査は型検査で行う
+- `&pat` は参照に一致し、参照先を `pat` で照合する
+  - `&` の後に範囲や `|`・`in` のパターンを置く場合は括弧で囲む (`&(1..=9)`)
+  - `&&` は式と同じく 1 トークンであり、`&` 2 つとしては扱わない。`& &x` のように分けて書く
+- 参照の値をパターンで照合する場合、参照を外して照合し、束縛する変数は参照となる (default binding modes)
+  - `ref` / `ref mut` による束縛は無い
+- 構造体のパターンの `x` は `x: x` の省略とする
 
 ## 型
 
