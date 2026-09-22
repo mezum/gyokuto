@@ -82,6 +82,11 @@ impl AsSexpr for Expr {
                     .into_iter()
                     .chain(otherwise.as_ref().map(AsSexpr::as_sexpr)),
             ),
+            ExprKind::Loop(body) => list("loop", [body.as_sexpr()]),
+            ExprKind::While { cond, body } => list("while", [cond.as_sexpr(), body.as_sexpr()]),
+            ExprKind::For { var, iter, body } => {
+                list("for", [var.clone(), iter.as_sexpr(), body.as_sexpr()])
+            }
             ExprKind::Break(value) => list("break", value.as_ref().map(AsSexpr::as_sexpr)),
             ExprKind::Continue => "(continue)".to_string(),
             ExprKind::Return(value) => list("return", value.as_ref().map(AsSexpr::as_sexpr)),

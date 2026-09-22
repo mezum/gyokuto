@@ -19,6 +19,35 @@ where
             kind: ExprKind::Block(block),
             span: e.span(),
         });
+        let name = just(Token::Ident)
+            .to_span()
+            .map(move |span: Span| src[span.into_range()].to_string());
+        let loop_expr = choice((
+            just(Token::Loop)
+                .ignore_then(block.clone())
+                .map(ExprKind::Loop),
+            just(Token::While)
+                .ignore_then(cond.clone())
+                .then(block.clone())
+                .map(|(cond, body)| ExprKind::While {
+                    cond: Box::new(cond),
+                    body,
+                }),
+            just(Token::For)
+                .ignore_then(name)
+                .then_ignore(just(Token::In))
+                .then(cond.clone())
+                .then(block.clone())
+                .map(|((var, iter), body)| ExprKind::For {
+                    var,
+                    iter: Box::new(iter),
+                    body,
+                }),
+        ))
+        .map_with(|kind, e| Expr {
+            kind,
+            span: e.span(),
+        });
         let if_expr = recursive({
             let block_expr = block_expr.clone();
             move |if_expr| {
@@ -40,7 +69,7 @@ where
                     })
             }
         });
-        choice((block_expr, if_expr))
+        choice((block_expr, if_expr, loop_expr))
     })
 }
 

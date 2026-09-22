@@ -74,6 +74,17 @@ pub enum ExprKind {
         then: Block,
         otherwise: Option<Box<Expr>>,
     },
+    Loop(Block),
+    While {
+        cond: Box<Expr>,
+        body: Block,
+    },
+    /// `for var in iter { .. }`
+    For {
+        var: String,
+        iter: Box<Expr>,
+        body: Block,
+    },
     Break(Option<Box<Expr>>),
     Continue,
     Return(Option<Box<Expr>>),
