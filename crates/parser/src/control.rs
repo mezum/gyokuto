@@ -276,4 +276,50 @@ mod tests {
     fn invalid_match(#[case] src: &str) {
         assert!(!parse_expr(src).1.is_empty());
     }
+
+    #[rstest]
+    #[case("if let Some(x) = a { b }", "(if (let (Some x) a) (block b))")]
+    #[case(
+        "if let Some(x) = a && x > b { c }",
+        "(if (And (let (Some x) a) (Gt x b)) (block c))"
+    )]
+    #[case(
+        "if a && let Some(x) = b { c }",
+        "(if (And a (let (Some x) b)) (block c))"
+    )]
+    #[case(
+        "if let A = a && let B = b && c { d }",
+        "(if (And (And (let A a) (let B b)) c) (block d))"
+    )]
+    #[case("if let A = a == b { c }", "(if (let A (Eq a b)) (block c))")]
+    #[case("if let A = (a || b) { c }", "(if (let A (paren (Or a b))) (block c))")]
+    #[case(
+        "if let A = a { b } else if let B = c { d }",
+        "(if (let A a) (block b) (if (let B c) (block d)))"
+    )]
+    #[case(
+        "while let Some(x) = it.next() { f(x); }",
+        "(while (let (Some x) (method it next)) (block (semi (call f x))))"
+    )]
+    fn let_condition(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("if let A = a || b {}")]
+    #[case("if a || let A = b {}")]
+    #[case("if !let A = a {}")]
+    #[case("if (let A = a) {}")]
+    #[case("if let A = { a } {}")]
+    #[case("if let A = a..b {}")]
+    #[case("if x = let A = a {}")]
+    #[case("if return let A = a {}")]
+    #[case("let A = a")]
+    #[case("a && let A = b")]
+    #[case("match let A = a { _ => b }")]
+    #[case("for x in let A = a {}")]
+    #[case("{ let x = let A = a; }")]
+    fn invalid_let_condition(#[case] src: &str) {
+        assert!(!parse_expr(src).1.is_empty());
+    }
 }
