@@ -1,36 +1,39 @@
-use crate::ast::{Expr, ExprKind, Lit, Path, PathSegment, Span};
+use crate::ast::{BinaryOp, Expr, ExprKind, Lit, Path, PathSegment, Span, UnaryOp};
+use crate::error::Error;
 use crate::literal;
+use chumsky::pratt::{Associativity, Operator, infix, left, none, prefix};
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
 use logos::Logos;
 use std::iter::once;
 
-pub type Error = Rich<'static, Token>;
-
-type Extra<'tok> = extra::Err<Rich<'tok, Token>>;
+type Extra = extra::Err<Error>;
 
 /// 式を解析する
 pub fn parse_expr(src: &str) -> (Option<Expr>, Vec<Error>) {
-    let tokens: Vec<(Token, Span)> = Token::lexer(src)
+    let lexed: Vec<_> = Token::lexer(src)
         .spanned()
-        .map(|(token, span)| (token.unwrap_or(Token::Error), span.into()))
+        .map(|(token, span)| (token, Span::from(span)))
         .collect();
-    let lex_errors = tokens
+    let tokens: Vec<(Token, Span)> = lexed
         .iter()
-        .filter(|(token, _)| *token == Token::Error)
-        .map(|(_, span)| Rich::custom(*span, "invalid token"));
+        .map(|&(token, span)| (token.unwrap_or(Token::Error), span))
+        .collect();
+    let lex_errors = lexed.iter().filter_map(|&(token, span)| {
+        token.err().map(|error| Error {
+            span,
+            kind: error.into(),
+        })
+    });
     let eoi = Span::from(src.len()..src.len());
     let (expr, parse_errors) = expr(src)
         .then_ignore(end())
         .parse(tokens.as_slice().map(eoi, |(token, span)| (token, span)))
         .into_output_errors();
-    let errors = lex_errors
-        .chain(parse_errors.into_iter().map(Rich::into_owned))
-        .collect();
-    (expr, errors)
+    (expr, lex_errors.chain(parse_errors).collect())
 }
 
-fn expr<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, Expr, Extra<'tok>> + Clone
+fn expr<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, Expr, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
@@ -53,8 +56,11 @@ where
             let span: Span = e.span();
             literal::decode(token, &src[span.into_range()])
                 .map(ExprKind::Lit)
-                .unwrap_or_else(|message| {
-                    emitter.emit(Rich::custom(span, message));
+                .unwrap_or_else(|error| {
+                    emitter.emit(Error {
+                        span,
+                        kind: error.into(),
+                    });
                     ExprKind::Error
                 })
         });
@@ -107,7 +113,7 @@ where
             kind: ExprKind::Error,
             span,
         };
-        choice((
+        let atom = choice((
             bool_lit,
             lit,
             path(src).map(ExprKind::Path),
@@ -136,11 +142,144 @@ where
                 (Token::LBrace, Token::RBrace),
             ],
             error,
-        )))
+        )));
+
+        let unary = prefix(
+            11,
+            choice((
+                just(Token::Amp).then(just(Token::Mut)).to(UnaryOp::RefMut),
+                select! {
+                    Token::Minus => UnaryOp::Neg,
+                    Token::Bang => UnaryOp::Not,
+                    Token::Star => UnaryOp::Deref,
+                    Token::Amp => UnaryOp::Ref,
+                },
+            )),
+            |op, expr, e| Expr {
+                kind: ExprKind::Unary {
+                    op,
+                    expr: Box::new(expr),
+                },
+                span: e.span(),
+            },
+        );
+        let ops = atom.pratt((
+            unary,
+            binary(
+                left(10),
+                select! {
+                    Token::Star => BinaryOp::Mul,
+                    Token::Slash => BinaryOp::Div,
+                    Token::Percent => BinaryOp::Rem,
+                },
+            ),
+            binary(
+                left(9),
+                select! {
+                    Token::Plus => BinaryOp::Add,
+                    Token::Minus => BinaryOp::Sub,
+                },
+            ),
+            binary(
+                left(8),
+                select! {
+                    Token::Shl => BinaryOp::Shl,
+                    Token::Shr => BinaryOp::Shr,
+                },
+            ),
+            binary(left(7), just(Token::Amp).to(BinaryOp::BitAnd)),
+            binary(left(6), just(Token::Caret).to(BinaryOp::BitXor)),
+            binary(left(5), just(Token::Pipe).to(BinaryOp::BitOr)),
+            binary(
+                none(4),
+                select! {
+                    Token::EqEq => BinaryOp::Eq,
+                    Token::Ne => BinaryOp::Ne,
+                    Token::Lt => BinaryOp::Lt,
+                    Token::Gt => BinaryOp::Gt,
+                    Token::Le => BinaryOp::Le,
+                    Token::Ge => BinaryOp::Ge,
+                },
+            ),
+            binary(left(3), just(Token::AndAnd).to(BinaryOp::And)),
+            binary(left(2), just(Token::OrOr).to(BinaryOp::Or)),
+        ));
+
+        let range_tail = choice((
+            just(Token::DotDotEq)
+                .ignore_then(ops.clone())
+                .map(|end| (true, Some(end))),
+            just(Token::DotDot)
+                .ignore_then(ops.clone().or_not())
+                .map(|end| (false, end)),
+        ));
+        let range = |start: Option<Expr>, (inclusive, end): (bool, Option<Expr>)| ExprKind::Range {
+            start: start.map(Box::new),
+            end: end.map(Box::new),
+            inclusive,
+        };
+        let range = choice((
+            ops.then(range_tail.clone().or_not())
+                .map_with(move |(start, tail), e| match tail {
+                    None => start,
+                    Some(tail) => Expr {
+                        kind: range(Some(start), tail),
+                        span: e.span(),
+                    },
+                }),
+            range_tail.map_with(move |tail, e| Expr {
+                kind: range(None, tail),
+                span: e.span(),
+            }),
+        ));
+
+        let assign_op = select! {
+            Token::Eq => None,
+            Token::PlusEq => Some(BinaryOp::Add),
+            Token::MinusEq => Some(BinaryOp::Sub),
+            Token::StarEq => Some(BinaryOp::Mul),
+            Token::SlashEq => Some(BinaryOp::Div),
+            Token::PercentEq => Some(BinaryOp::Rem),
+            Token::AmpEq => Some(BinaryOp::BitAnd),
+            Token::PipeEq => Some(BinaryOp::BitOr),
+            Token::CaretEq => Some(BinaryOp::BitXor),
+            Token::ShlEq => Some(BinaryOp::Shl),
+            Token::ShrEq => Some(BinaryOp::Shr),
+        };
+        range
+            .then(assign_op.then(expr).or_not())
+            .map_with(|(place, assign), e| match assign {
+                None => place,
+                Some((op, value)) => Expr {
+                    kind: ExprKind::Assign {
+                        op,
+                        place: Box::new(place),
+                        value: Box::new(value),
+                    },
+                    span: e.span(),
+                },
+            })
     })
 }
 
-fn path<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, Path, Extra<'tok>> + Clone
+fn binary<'tok, I>(
+    associativity: Associativity,
+    op: impl Parser<'tok, I, BinaryOp, Extra> + Clone,
+) -> impl Operator<'tok, I, Expr, Extra> + Clone
+where
+    I: ValueInput<'tok, Token = Token, Span = Span>,
+{
+    infix(associativity, op, |lhs, op, rhs, e| Expr {
+        kind: ExprKind::Binary {
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+        },
+        span: e.span(),
+    })
+}
+
+fn path<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, Path, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
@@ -171,6 +310,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::{ErrorKind, Expected, Found, LiteralError};
+    use gyokuto_lexer::LexError;
 
     fn show(expr: &Expr) -> String {
         let list = |name: &str, exprs: &[&Expr]| {
@@ -196,6 +337,21 @@ mod tests {
             ExprKind::Tuple(es) => list("tuple", &es.iter().collect::<Vec<_>>()),
             ExprKind::Array(es) => list("array", &es.iter().collect::<Vec<_>>()),
             ExprKind::Repeat { elem, len } => list("repeat", &[elem, len]),
+            ExprKind::Unary { op, expr } => list(&format!("{op:?}"), &[expr]),
+            ExprKind::Binary { op, lhs, rhs } => list(&format!("{op:?}"), &[lhs, rhs]),
+            ExprKind::Range {
+                start,
+                end,
+                inclusive,
+            } => {
+                let end_point = |e: &Option<Box<Expr>>| e.as_deref().map_or("_".to_string(), show);
+                let op = if *inclusive { "..=" } else { ".." };
+                format!("({op} {} {})", end_point(start), end_point(end))
+            }
+            ExprKind::Assign { op, place, value } => {
+                let op = op.map_or(String::new(), |op| format!("{op:?}"));
+                list(&format!("{op}="), &[place, value])
+            }
             ExprKind::Error => "error".to_string(),
         }
     }
@@ -231,7 +387,11 @@ mod tests {
     fn too_large_integer_is_error() {
         let (expr, errors) = parse_expr("[18446744073709551616, a]");
         assert_eq!(errors.len(), 1, "{errors:?}");
-        assert_eq!(errors[0].span().into_range(), 1..21);
+        assert_eq!(errors[0].span.into_range(), 1..21);
+        assert_eq!(
+            errors[0].kind,
+            ErrorKind::Literal(LiteralError::IntegerTooLarge)
+        );
         assert_eq!(show(&expr.unwrap()), "(array error a)");
     }
 
@@ -275,7 +435,8 @@ mod tests {
     fn lexical_errors_are_reported() {
         let (expr, errors) = parse_expr("$");
         assert_eq!(errors.len(), 1, "{errors:?}");
-        assert_eq!(errors[0].span().into_range(), 0..1);
+        assert_eq!(errors[0].span.into_range(), 0..1);
+        assert_eq!(errors[0].kind, ErrorKind::Lex(LexError::UnexpectedChar));
         assert_eq!(show(&expr.unwrap()), "error");
     }
 
@@ -328,6 +489,15 @@ mod tests {
     fn recovers_inside_delimiters() {
         let (expr, errors) = parse_expr("[(a b), c]");
         assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].span.into_range(), 4..5);
+        assert!(
+            matches!(
+                &errors[0].kind,
+                ErrorKind::Syntax { found: Found::Token(Token::Ident), expected }
+                    if expected.contains(&Expected::Token(Token::RParen))
+            ),
+            "{errors:?}"
+        );
         assert_eq!(show(&expr.unwrap()), "(array error c)");
     }
 
@@ -336,6 +506,146 @@ mod tests {
         let (expr, errors) = parse_expr("[a, $]");
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert_eq!(show(&expr.unwrap()), "(array a error)");
+    }
+
+    #[test]
+    fn unary_operators() {
+        assert_eq!(parse_ok("-a"), "(Neg a)");
+        assert_eq!(parse_ok("!a"), "(Not a)");
+        assert_eq!(parse_ok("*a"), "(Deref a)");
+        assert_eq!(parse_ok("&a"), "(Ref a)");
+        assert_eq!(parse_ok("&mut a"), "(RefMut a)");
+        assert_eq!(parse_ok("-!*a"), "(Neg (Not (Deref a)))");
+        assert!(!parse_expr("&&a").1.is_empty());
+    }
+
+    #[test]
+    fn negative_literal_is_unary() {
+        assert_eq!(
+            parse_ok("-128i8"),
+            "(Neg Int { value: 128, suffix: Some(I8) })"
+        );
+    }
+
+    #[test]
+    fn binary_precedence() {
+        for (src, expected) in [
+            ("a * b + c", "(Add (Mul a b) c)"),
+            ("a + b * c", "(Add a (Mul b c))"),
+            ("a + b << c", "(Shl (Add a b) c)"),
+            ("a << b & c", "(BitAnd (Shl a b) c)"),
+            ("a & b ^ c", "(BitXor (BitAnd a b) c)"),
+            ("a ^ b | c", "(BitOr (BitXor a b) c)"),
+            ("a | b == c", "(Eq (BitOr a b) c)"),
+            ("a == b && c", "(And (Eq a b) c)"),
+            ("a && b || c", "(Or (And a b) c)"),
+            ("-a * b", "(Mul (Neg a) b)"),
+            ("(a + b) * c", "(Mul (paren (Add a b)) c)"),
+        ] {
+            assert_eq!(parse_ok(src), expected, "{src}");
+        }
+    }
+
+    #[test]
+    fn binary_operators() {
+        for (src, op) in [
+            ("a * b", "Mul"),
+            ("a / b", "Div"),
+            ("a % b", "Rem"),
+            ("a + b", "Add"),
+            ("a - b", "Sub"),
+            ("a << b", "Shl"),
+            ("a >> b", "Shr"),
+            ("a & b", "BitAnd"),
+            ("a ^ b", "BitXor"),
+            ("a | b", "BitOr"),
+            ("a == b", "Eq"),
+            ("a != b", "Ne"),
+            ("a < b", "Lt"),
+            ("a > b", "Gt"),
+            ("a <= b", "Le"),
+            ("a >= b", "Ge"),
+            ("a && b", "And"),
+            ("a || b", "Or"),
+        ] {
+            assert_eq!(parse_ok(src), format!("({op} a b)"), "{src}");
+        }
+    }
+
+    #[test]
+    fn left_associative() {
+        assert_eq!(parse_ok("a - b - c"), "(Sub (Sub a b) c)");
+        assert_eq!(parse_ok("a || b || c"), "(Or (Or a b) c)");
+    }
+
+    #[test]
+    fn comparisons_do_not_chain() {
+        for src in ["a < b < c", "a == b == c", "a < b == c", "(a < b > c)"] {
+            assert!(!parse_expr(src).1.is_empty(), "{src}");
+        }
+        assert_eq!(parse_ok("(a < b) == c"), "(Eq (paren (Lt a b)) c)");
+    }
+
+    #[test]
+    fn operator_spans() {
+        let (expr, _) = parse_expr("a + -b");
+        let expr = expr.unwrap();
+        assert_eq!(expr.span.into_range(), 0..6);
+        let ExprKind::Binary { rhs, .. } = expr.kind else {
+            panic!("{expr:?}");
+        };
+        assert_eq!(rhs.span.into_range(), 4..6);
+    }
+
+    #[test]
+    fn ranges() {
+        for (src, expected) in [
+            ("a..b", "(.. a b)"),
+            ("a..", "(.. a _)"),
+            ("..b", "(.. _ b)"),
+            ("..", "(.. _ _)"),
+            ("a..=b", "(..= a b)"),
+            ("..=b", "(..= _ b)"),
+            ("a || b..c && d", "(.. (Or a b) (And c d))"),
+            ("(a..)", "(paren (.. a _))"),
+            ("[.., a..]", "(array (.. _ _) (.. a _))"),
+        ] {
+            assert_eq!(parse_ok(src), expected, "{src}");
+        }
+    }
+
+    #[test]
+    fn invalid_ranges() {
+        for src in ["a..=", "..=", "a..b..c", "..a..", "(a..=)"] {
+            assert!(!parse_expr(src).1.is_empty(), "{src}");
+        }
+    }
+
+    #[test]
+    fn assignments() {
+        for (src, op) in [
+            ("a = b", ""),
+            ("a += b", "Add"),
+            ("a -= b", "Sub"),
+            ("a *= b", "Mul"),
+            ("a /= b", "Div"),
+            ("a %= b", "Rem"),
+            ("a &= b", "BitAnd"),
+            ("a |= b", "BitOr"),
+            ("a ^= b", "BitXor"),
+            ("a <<= b", "Shl"),
+            ("a >>= b", "Shr"),
+        ] {
+            assert_eq!(parse_ok(src), format!("({op}= a b)"), "{src}");
+        }
+    }
+
+    #[test]
+    fn assignment_is_right_associative_and_weakest() {
+        assert_eq!(parse_ok("a = b = c"), "(= a (= b c))");
+        assert_eq!(parse_ok("a = b..c"), "(= a (.. b c))");
+        assert_eq!(parse_ok("a += b || c"), "(Add= a (Or b c))");
+        assert_eq!(parse_ok("*a = -b"), "(= (Deref a) (Neg b))");
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use crate::ast::{FloatSuffix, IntSuffix, Lit};
+use crate::error::LiteralError;
 use gyokuto_lexer::Token;
 
 const INT_SUFFIXES: [(&str, IntSuffix); 10] = [
@@ -18,12 +19,12 @@ const FLOAT_SUFFIXES: [(&str, FloatSuffix); 2] =
     [("f32", FloatSuffix::F32), ("f64", FloatSuffix::F64)];
 
 /// リテラルのトークンを値に変換する
-pub(crate) fn decode(token: Token, text: &str) -> Result<Lit, &'static str> {
+pub(crate) fn decode(token: Token, text: &str) -> Result<Lit, LiteralError> {
     let quoted = |prefix: usize| {
         text.get(prefix + 1..text.len().saturating_sub(1))
-            .ok_or(MALFORMED)
+            .ok_or(LiteralError::Malformed)
     };
-    let utf8 = |bytes| String::from_utf8(bytes).map_err(|_| "literal is not valid UTF-8");
+    let utf8 = |bytes| String::from_utf8(bytes).map_err(|_| LiteralError::InvalidUtf8);
     Ok(match token {
         Token::Int => decode_int(text)?,
         Token::Float => {
@@ -37,31 +38,31 @@ pub(crate) fn decode(token: Token, text: &str) -> Result<Lit, &'static str> {
             let chars: Vec<char> = utf8(unescape(quoted(0)?)?)?.chars().collect();
             match chars[..] {
                 [c] => Lit::Char(c),
-                _ => return Err(MALFORMED),
+                _ => return Err(LiteralError::Malformed),
             }
         }
         Token::Byte => match unescape(quoted(1)?)?[..] {
             [b] => Lit::Byte(b),
-            _ => return Err(MALFORMED),
+            _ => return Err(LiteralError::Malformed),
         },
         Token::Str => Lit::Str(utf8(unescape(quoted(0)?)?)?),
         Token::ByteStr => Lit::ByteStr(unescape(quoted(1)?)?),
-        Token::RawStr => Lit::Str(raw_body(text.get(1..).ok_or(MALFORMED)?)?),
-        Token::RawByteStr => Lit::ByteStr(raw_body(text.get(2..).ok_or(MALFORMED)?)?.into_bytes()),
-        _ => return Err("not a literal token"),
+        Token::RawStr => Lit::Str(raw_body(text.get(1..).ok_or(LiteralError::Malformed)?)?),
+        Token::RawByteStr => {
+            Lit::ByteStr(raw_body(text.get(2..).ok_or(LiteralError::Malformed)?)?.into_bytes())
+        }
+        _ => return Err(LiteralError::NotALiteral),
     })
 }
 
-const MALFORMED: &str = "malformed literal";
-
-fn decode_int(text: &str) -> Result<Lit, &'static str> {
+fn decode_int(text: &str) -> Result<Lit, LiteralError> {
     let (digits, suffix) = split_suffix(text, &INT_SUFFIXES);
     let (radix, digits) = [("0x", 16), ("0o", 8), ("0b", 2)]
         .into_iter()
         .find_map(|(prefix, radix)| digits.strip_prefix(prefix).map(|d| (radix, d)))
         .unwrap_or((10, digits));
     let value = u64::from_str_radix(&digits.replace('_', ""), radix)
-        .map_err(|_| "integer literal is too large")?;
+        .map_err(|_| LiteralError::IntegerTooLarge)?;
     Ok(Lit::Int { value, suffix })
 }
 
@@ -73,17 +74,16 @@ fn split_suffix<'a, S: Copy>(text: &'a str, suffixes: &[(&str, S)]) -> (&'a str,
 }
 
 /// `r` / `br` の後の `#...#"` と `"#...#` を除き、CRLF を正規化した中身を得る
-fn raw_body(text: &str) -> Result<String, &'static str> {
+fn raw_body(text: &str) -> Result<String, LiteralError> {
     let hashes = text.len() - text.trim_start_matches('#').len();
     let body = text
         .get(hashes + 1..text.len().saturating_sub(hashes + 1))
-        .ok_or(MALFORMED)?;
+        .ok_or(LiteralError::Malformed)?;
     Ok(body.replace("\r\n", "\n"))
 }
 
 /// エスケープ・行継続・CRLF を処理したバイト列を得る
-fn unescape(body: &str) -> Result<Vec<u8>, &'static str> {
-    const INVALID_ESCAPE: &str = "invalid escape sequence";
+fn unescape(body: &str) -> Result<Vec<u8>, LiteralError> {
     let body = body.replace("\r\n", "\n");
     let mut bytes = Vec::new();
     let mut chars = body.chars();
@@ -100,7 +100,7 @@ fn unescape(body: &str) -> Result<Vec<u8>, &'static str> {
             Some(c @ ('\\' | '\'' | '"')) => bytes.push(c as u8),
             Some('x') => {
                 let hex: String = chars.by_ref().take(2).collect();
-                bytes.push(u8::from_str_radix(&hex, 16).map_err(|_| INVALID_ESCAPE)?);
+                bytes.push(u8::from_str_radix(&hex, 16).map_err(|_| LiteralError::InvalidEscape)?);
             }
             Some('u') => {
                 let hex: String = chars
@@ -111,7 +111,7 @@ fn unescape(body: &str) -> Result<Vec<u8>, &'static str> {
                 let c = u32::from_str_radix(&hex, 16)
                     .ok()
                     .and_then(char::from_u32)
-                    .ok_or(INVALID_ESCAPE)?;
+                    .ok_or(LiteralError::InvalidEscape)?;
                 push_char(&mut bytes, c);
             }
             Some('\n') => {
@@ -120,7 +120,7 @@ fn unescape(body: &str) -> Result<Vec<u8>, &'static str> {
                     .trim_start_matches(is_pattern_white_space)
                     .chars()
             }
-            _ => return Err(INVALID_ESCAPE),
+            _ => return Err(LiteralError::InvalidEscape),
         }
     }
     Ok(bytes)
@@ -143,23 +143,23 @@ mod tests {
     use crate::ast::{FloatSuffix, IntSuffix};
     use logos::Logos;
 
-    fn lit(src: &str) -> Result<Lit, &'static str> {
+    fn lit(src: &str) -> Result<Lit, LiteralError> {
         let (token, span) = Token::lexer(src).spanned().next().unwrap();
         decode(token.unwrap(), &src[span])
     }
 
-    fn int(value: u64, suffix: Option<IntSuffix>) -> Result<Lit, &'static str> {
+    fn int(value: u64, suffix: Option<IntSuffix>) -> Result<Lit, LiteralError> {
         Ok(Lit::Int { value, suffix })
     }
 
-    fn float(digits: &str, suffix: Option<FloatSuffix>) -> Result<Lit, &'static str> {
+    fn float(digits: &str, suffix: Option<FloatSuffix>) -> Result<Lit, LiteralError> {
         Ok(Lit::Float {
             digits: digits.to_string(),
             suffix,
         })
     }
 
-    fn str(value: &str) -> Result<Lit, &'static str> {
+    fn str(value: &str) -> Result<Lit, LiteralError> {
         Ok(Lit::Str(value.to_string()))
     }
 
@@ -174,7 +174,10 @@ mod tests {
         assert_eq!(lit("0xffusize"), int(255, Some(IntSuffix::Usize)));
         assert_eq!(lit("1i64"), int(1, Some(IntSuffix::I64)));
         assert_eq!(lit("18446744073709551615"), int(u64::MAX, None));
-        assert!(lit("18446744073709551616").is_err());
+        assert_eq!(
+            lit("18446744073709551616"),
+            Err(LiteralError::IntegerTooLarge)
+        );
     }
 
     #[test]
@@ -249,19 +252,19 @@ mod tests {
 
     #[test]
     fn malformed_input_is_error_instead_of_panic() {
-        for (token, text) in [
-            (Token::Str, r#""\x80""#),
-            (Token::Str, r#""\q""#),
-            (Token::Str, r#""\xZZ""#),
-            (Token::Str, r#""\u{D800}""#),
-            (Token::Str, r#"""#),
-            (Token::Char, "''"),
-            (Token::Char, "'ab'"),
-            (Token::Byte, "b''"),
-            (Token::RawStr, "r#"),
-            (Token::Ident, "a"),
+        for (token, text, error) in [
+            (Token::Str, r#""\x80""#, LiteralError::InvalidUtf8),
+            (Token::Str, r#""\q""#, LiteralError::InvalidEscape),
+            (Token::Str, r#""\xZZ""#, LiteralError::InvalidEscape),
+            (Token::Str, r#""\u{D800}""#, LiteralError::InvalidEscape),
+            (Token::Str, r#"""#, LiteralError::Malformed),
+            (Token::Char, "''", LiteralError::Malformed),
+            (Token::Char, "'ab'", LiteralError::Malformed),
+            (Token::Byte, "b''", LiteralError::Malformed),
+            (Token::RawStr, "r#", LiteralError::Malformed),
+            (Token::Ident, "a", LiteralError::NotALiteral),
         ] {
-            assert!(decode(token, text).is_err(), "{token:?} {text}");
+            assert_eq!(decode(token, text), Err(error), "{token:?} {text}");
         }
     }
 

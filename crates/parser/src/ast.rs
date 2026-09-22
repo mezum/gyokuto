@@ -20,8 +20,60 @@ pub enum ExprKind {
         elem: Box<Expr>,
         len: Box<Expr>,
     },
+    Unary {
+        op: UnaryOp,
+        expr: Box<Expr>,
+    },
+    Binary {
+        op: BinaryOp,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
+    /// `start..end` / `start..=end`。端点は省略できる
+    Range {
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+        inclusive: bool,
+    },
+    /// `place = value`。複合代入では `op` に演算を持つ
+    Assign {
+        op: Option<BinaryOp>,
+        place: Box<Expr>,
+        value: Box<Expr>,
+    },
     /// 構文エラーから回復した箇所
     Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOp {
+    Neg,
+    Not,
+    Deref,
+    Ref,
+    RefMut,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryOp {
+    Mul,
+    Div,
+    Rem,
+    Add,
+    Sub,
+    Shl,
+    Shr,
+    BitAnd,
+    BitXor,
+    BitOr,
+    Eq,
+    Ne,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+    And,
+    Or,
 }
 
 #[derive(Debug, Clone, PartialEq)]
