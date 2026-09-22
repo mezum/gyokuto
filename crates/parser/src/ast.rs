@@ -152,10 +152,27 @@ pub enum ItemKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FnSig {
     pub name: String,
+    pub generics: Vec<GenericParam>,
     pub self_param: Option<SelfParam>,
     pub params: Vec<Param>,
     /// 無い場合はユニット型
     pub ret: Option<Type>,
+    pub where_preds: Vec<WherePred>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GenericParam {
+    /// `T: A + B`
+    Type { name: String, bounds: Vec<Path> },
+    /// `const N: T`
+    Const { name: String, ty: Type },
+}
+
+/// `where` の `T: A + B`
+#[derive(Debug, Clone, PartialEq)]
+pub struct WherePred {
+    pub ty: Type,
+    pub bounds: Vec<Path>,
 }
 
 /// `self` / `mut self` / `&self` / `&mut self`

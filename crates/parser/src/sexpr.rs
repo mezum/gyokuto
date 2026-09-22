@@ -1,8 +1,8 @@
 //! AST を S 式で表す
 
 use crate::ast::{
-    Arm, Block, Expr, ExprKind, Field, GenericArg, GenericArgs, Item, ItemKind, Lit, Pat, PatKind,
-    Path, SelfParam, Stmt, StmtKind, Type, TypeKind,
+    Arm, Block, Expr, ExprKind, Field, GenericArg, GenericArgs, GenericParam, Item, ItemKind, Lit,
+    Pat, PatKind, Path, SelfParam, Stmt, StmtKind, Type, TypeKind,
 };
 use std::iter::once;
 
@@ -120,11 +120,28 @@ impl AsSexpr for Item {
                         .iter()
                         .map(|p| list(":", [p.pat.as_sexpr(), p.ty.as_sexpr()])),
                 );
+                let generics = sig.generics.iter().map(|g| match g {
+                    GenericParam::Type { name, bounds } if bounds.is_empty() => name.clone(),
+                    GenericParam::Type { name, bounds } => {
+                        list(":", once(name.clone()).chain(sexprs(bounds)))
+                    }
+                    GenericParam::Const { name, ty } => {
+                        list("const", [name.clone(), ty.as_sexpr()])
+                    }
+                });
+                let where_preds = sig
+                    .where_preds
+                    .iter()
+                    .map(|p| list(":", once(p.ty.as_sexpr()).chain(sexprs(&p.bounds))));
+                let non_empty =
+                    |name, items: Vec<String>| (!items.is_empty()).then(|| list(name, items));
                 list(
                     "fn",
-                    [sig.name.clone(), list("params", params)]
-                        .into_iter()
+                    once(sig.name.clone())
+                        .chain(non_empty("generics", generics.collect()))
+                        .chain(once(list("params", params)))
                         .chain(sig.ret.as_ref().map(|ty| list("->", [ty.as_sexpr()])))
+                        .chain(non_empty("where", where_preds.collect()))
                         .chain(once(body.as_sexpr())),
                 )
             }

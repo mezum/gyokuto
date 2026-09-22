@@ -1,10 +1,12 @@
-use crate::ast::{Block, Expr, FnSig, Item, ItemKind, Param, Pat, SelfParam, Span};
+use crate::ast::{
+    Block, Expr, FnSig, GenericParam, Item, ItemKind, Param, Pat, SelfParam, Span, WherePred,
+};
 use crate::control::block_like;
 use crate::error::Error;
 use crate::parser::{Extra, expr, input, lex};
 use crate::pattern::{ident, no_top, pattern};
 use crate::stmt::block;
-use crate::types::ty;
+use crate::types::{bounds, ty};
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
 
@@ -45,7 +47,7 @@ where
         mutable.map(|mutable| SelfParam::Value { mutable }),
     ))
     .then_ignore(just(Token::SelfValue));
-    let param = no_top(src, expr, block_like, pattern)
+    let param = no_top(src, expr.clone(), block_like.clone(), pattern)
         .then_ignore(just(Token::Colon))
         .then(ty.clone())
         .map(|(pat, ty)| Param { pat, ty });
@@ -66,16 +68,59 @@ where
         params.map(|params| (None, params)),
     ))
     .delimited_by(just(Token::LParen), just(Token::RParen));
+    let bounds = bounds(src, expr, block_like);
+    let generic = choice((
+        just(Token::Const)
+            .ignore_then(ident(src))
+            .then_ignore(just(Token::Colon))
+            .then(ty.clone())
+            .map(|(name, ty)| GenericParam::Const { name, ty }),
+        ident(src)
+            .then(
+                just(Token::Colon)
+                    .ignore_then(bounds.clone())
+                    .or_not()
+                    .map(Option::unwrap_or_default),
+            )
+            .map(|(name, bounds)| GenericParam::Type { name, bounds }),
+    ));
+    let generics = generic
+        .separated_by(just(Token::Comma))
+        .allow_trailing()
+        .collect()
+        .delimited_by(just(Token::Lt), just(Token::Gt))
+        .or_not()
+        .map(Option::unwrap_or_default);
+    let where_pred = ty
+        .clone()
+        .then_ignore(just(Token::Colon))
+        .then(bounds)
+        .map(|(ty, bounds)| WherePred { ty, bounds });
+    let where_preds = just(Token::Where)
+        .ignore_then(
+            where_pred
+                .separated_by(just(Token::Comma))
+                .allow_trailing()
+                .collect(),
+        )
+        .or_not()
+        .map(Option::unwrap_or_default);
     let sig = just(Token::Fn)
         .ignore_then(ident(src))
+        .then(generics)
         .then(self_and_params)
         .then(just(Token::Arrow).ignore_then(ty).or_not())
-        .map(|((name, (self_param, params)), ret)| FnSig {
-            name,
-            self_param,
-            params,
-            ret,
-        });
+        .then(where_preds)
+        .map(
+            |((((name, generics), (self_param, params)), ret), where_preds)| FnSig {
+                name,
+                generics,
+                self_param,
+                params,
+                ret,
+                where_preds,
+            },
+        );
     sig.then(block).map_with(|(sig, body), e| Item {
         kind: ItemKind::Fn { sig, body },
         span: e.span(),

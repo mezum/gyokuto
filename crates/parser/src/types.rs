@@ -47,6 +47,23 @@ where
     })
 }
 
+/// `A + B` の境界 (TypeBounds) を解析する
+pub(crate) fn bounds<'tok, 'src: 'tok, I>(
+    src: &'src str,
+    expr: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
+    block_like: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
+) -> impl Parser<'tok, I, Vec<Path>, Extra> + Clone
+where
+    I: ValueInput<'tok, Token = Token, Span = Span>,
+{
+    let ty = ty(src, expr.clone(), block_like.clone());
+    let no_bounds = no_bounds(src, expr, block_like.clone(), ty.clone());
+    type_path(src, ty, no_bounds, block_like)
+        .separated_by(just(Token::Plus))
+        .at_least(1)
+        .collect()
+}
+
 /// `+` を含まない型 (TypeNoBounds) を解析する
 pub(crate) fn ty_no_bounds<'tok, 'src: 'tok, I>(
     src: &'src str,
