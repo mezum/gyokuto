@@ -160,10 +160,29 @@ pub enum PatKind {
     Tuple(Vec<Pat>),
     Slice(Vec<Pat>),
     Path(Path),
+    /// `P(a, b)`
+    TupleStruct {
+        path: Path,
+        elems: Vec<Pat>,
+    },
+    /// `P { a, b: c, .. }`。`rest` は `..` の有無
+    Struct {
+        path: Path,
+        fields: Vec<FieldPat>,
+        rest: bool,
+    },
     /// `a | b`
     Or(Vec<Pat>),
     /// 構文エラーから回復した箇所
     Error,
+}
+
+/// 構造体のパターンのフィールド。`x` は `x: x` として保持する
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldPat {
+    pub name: String,
+    pub pat: Pat,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]

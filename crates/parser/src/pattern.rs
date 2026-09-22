@@ -1,4 +1,4 @@
-use crate::ast::{Expr, ExprKind, Pat, PatKind, PathName, Span};
+use crate::ast::{Expr, ExprKind, FieldPat, Pat, PatKind, PathName, Span};
 use crate::control::block_like;
 use crate::error::Error;
 use crate::parser::{Extra, expr, input, lex, path, signed_literal};
@@ -115,6 +115,7 @@ where
         .allow_trailing()
         .collect::<Vec<_>>();
     let parens = pattern
+        .clone()
         .then(just(Token::Comma).ignore_then(items.clone()).or_not())
         .or_not()
         .delimited_by(just(Token::LParen), just(Token::RParen))
@@ -124,19 +125,83 @@ where
             Some((first, Some(rest))) => PatKind::Tuple(once(first).chain(rest).collect()),
         });
     let slice = items
+        .clone()
         .delimited_by(just(Token::LBracket), just(Token::RBracket))
         .map(PatKind::Slice);
-    let binding = path.map(|path| match &path.segments[..] {
-        [segment] if segment.args.is_none() => match &segment.name {
-            PathName::Ident(name) => PatKind::Ident {
-                mutable: false,
-                name: name.clone(),
-                sub: None,
-            },
-            _ => PatKind::Path(path),
-        },
-        _ => PatKind::Path(path),
+
+    let field = choice((
+        ident(src).then_ignore(just(Token::Colon)).then(pattern),
+        just(Token::Mut)
+            .or_not()
+            .then(ident(src))
+            .map_with(|(mutable, name), e| {
+                let kind = PatKind::Ident {
+                    mutable: mutable.is_some(),
+                    name: name.clone(),
+                    sub: None,
+                };
+                (
+                    name,
+                    Pat {
+                        kind,
+                        span: e.span(),
+                    },
+                )
+            }),
+    ))
+    .map_with(|(name, pat), e| FieldPat {
+        name,
+        pat,
+        span: e.span(),
     });
+    let fields = field
+        .clone()
+        .then_ignore(just(Token::Comma))
+        .repeated()
+        .collect::<Vec<_>>()
+        .then(
+            choice((
+                field.map(|field| (Some(field), false)),
+                just(Token::DotDot)
+                    .then_ignore(just(Token::Comma).or_not())
+                    .to((None, true)),
+            ))
+            .or_not(),
+        )
+        .delimited_by(just(Token::LBrace), just(Token::RBrace))
+        .map(|(mut fields, last)| {
+            let (last, rest) = last.unwrap_or((None, false));
+            fields.extend(last);
+            (fields, rest)
+        });
+
+    enum Suffix {
+        Tuple(Vec<Pat>),
+        Struct(Vec<FieldPat>, bool),
+    }
+    let path_pat = path
+        .then(
+            choice((
+                items
+                    .delimited_by(just(Token::LParen), just(Token::RParen))
+                    .map(Suffix::Tuple),
+                fields.map(|(fields, rest)| Suffix::Struct(fields, rest)),
+            ))
+            .or_not(),
+        )
+        .map(|(path, suffix)| match (suffix, &path.segments[..]) {
+            (Some(Suffix::Tuple(elems)), _) => PatKind::TupleStruct { path, elems },
+            (Some(Suffix::Struct(fields, rest)), _) => PatKind::Struct { path, fields, rest },
+            (None, [segment]) if segment.args.is_none() => match &segment.name {
+                PathName::Ident(name) => PatKind::Ident {
+                    mutable: false,
+                    name: name.clone(),
+                    sub: None,
+                },
+                _ => PatKind::Path(path),
+            },
+            (None, _) => PatKind::Path(path),
+        });
 
     let error = |span| Pat {
         kind: PatKind::Error,
@@ -163,7 +228,7 @@ where
                     name,
                     sub: None,
                 }),
-            binding,
+            path_pat,
         ))
         .map_with(|kind, e| Pat {
             kind,

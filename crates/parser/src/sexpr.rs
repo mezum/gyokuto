@@ -159,6 +159,13 @@ impl AsSexpr for Pat {
             PatKind::Tuple(pats) => list("tuple", sexprs(pats)),
             PatKind::Slice(pats) => list("slice", sexprs(pats)),
             PatKind::Path(path) => path.as_sexpr(),
+            PatKind::TupleStruct { path, elems } => list(&path.as_sexpr(), sexprs(elems)),
+            PatKind::Struct { path, fields, rest } => list(
+                "struct",
+                once(path.as_sexpr())
+                    .chain(fields.iter().map(|f| list(&f.name, [f.pat.as_sexpr()])))
+                    .chain(rest.then(|| "..".to_string())),
+            ),
             PatKind::Or(pats) => list("|", sexprs(pats)),
             PatKind::Error => "error".to_string(),
         }
