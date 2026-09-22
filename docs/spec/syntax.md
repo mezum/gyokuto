@@ -23,7 +23,8 @@
 ## 式
 
 ```ebnf
-Expr ::= LiteralExpr | PathExpr | ParenExpr | TupleExpr | ArrayExpr
+Expr        ::= AssignExpr
+PrimaryExpr ::= LiteralExpr | PathExpr | ParenExpr | TupleExpr | ArrayExpr
 ```
 
 ### リテラル式
@@ -69,5 +70,57 @@ ArrayExpr ::= '[' ( Expr ( ',' Expr )* ','? )? ']'
 ```
 
 - `[a; n]` は `a` を `n` 個並べた配列となる
+
+### 演算子式
+
+```ebnf
+AssignExpr ::= RangeExpr ( AssignOp AssignExpr )?
+AssignOp   ::= '=' | '+=' | '-=' | '*=' | '/=' | '%=' | '&=' | '|=' | '^=' | '<<=' | '>>='
+RangeExpr  ::= OrExpr ( ( '..' | '..=' ) OrExpr )?
+             | OrExpr '..'
+             | '..' OrExpr?
+             | '..=' OrExpr
+OrExpr     ::= AndExpr ( '||' AndExpr )*
+AndExpr    ::= CmpExpr ( '&&' CmpExpr )*
+CmpExpr    ::= BitOrExpr ( CmpOp BitOrExpr )?
+CmpOp      ::= '==' | '!=' | '<' | '>' | '<=' | '>='
+BitOrExpr  ::= BitXorExpr ( '|' BitXorExpr )*
+BitXorExpr ::= BitAndExpr ( '^' BitAndExpr )*
+BitAndExpr ::= ShiftExpr ( '&' ShiftExpr )*
+ShiftExpr  ::= AddExpr ( ( '<<' | '>>' ) AddExpr )*
+AddExpr    ::= MulExpr ( ( '+' | '-' ) MulExpr )*
+MulExpr    ::= UnaryExpr ( ( '*' | '/' | '%' ) UnaryExpr )*
+UnaryExpr  ::= ( '-' | '!' | '*' | '&' | '&' 'mut' ) UnaryExpr
+             | PrimaryExpr
+```
+
+優先順位と結合性は以下の通り (上ほど強く結合する)。
+
+| 演算子 | 結合性 |
+| --- | --- |
+| 単項 `-` `!` `*` `&` `&mut` | - |
+| `*` `/` `%` | 左 |
+| `+` `-` | 左 |
+| `<<` `>>` | 左 |
+| `&` | 左 |
+| `^` | 左 |
+| `\|` | 左 |
+| `==` `!=` `<` `>` `<=` `>=` | なし |
+| `&&` | 左 |
+| `\|\|` | 左 |
+| `..` `..=` | なし |
+| `=` と複合代入 | 右 |
+
+- 結合性が「なし」の演算子は連鎖できない
+  - `a < b < c` や `a..b..c` は構文エラーとし、`(a < b) == c` のように括弧で明示する
+- 単項 `-` は `-128i8` のようなリテラルにも演算子として適用する
+  - 値の範囲の検査は型検査で行うため、`-128i8` は `i8` の最小値として扱える
+- `&&` は 1 トークンの論理積であり、単項 `&` 2 つとしては扱わない
+- 範囲式は端点を省略できる (`a..` `..b` `..` `..=b`)
+  - `..=` は終端を省略できない
+  - `..` の後に式が始まらないトークンが続く場合は、終端を省略したものとする
+- 代入・複合代入は値が `()` の式とする
+  - 右結合のため `a = b = c` は `a = (b = c)` と解析され、型検査で `()` の代入としてエラーとなる
+  - 左辺が代入できる場所 (変数・フィールドなど) であるかは型検査で検査する
 
 [字句仕様]: ./lexical.md
