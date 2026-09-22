@@ -1,6 +1,7 @@
 //! 構文解析。仕様は `docs/spec/syntax.md` を参照。
 
 pub mod ast;
+mod display;
 mod error;
 mod literal;
 mod parser;

@@ -199,3 +199,16 @@ pub enum PathSegment {
     SelfValue,
     SelfType,
 }
+
+impl PathSegment {
+    /// ソース上の表記を得る
+    pub fn as_str(&self) -> &str {
+        match self {
+            PathSegment::Ident(name) => name,
+            PathSegment::Crate => "crate",
+            PathSegment::Super => "super",
+            PathSegment::SelfValue => "self",
+            PathSegment::SelfType => "Self",
+        }
+    }
+}
