@@ -5,6 +5,7 @@ mod control;
 mod error;
 mod literal;
 mod parser;
+mod pattern;
 mod sexpr;
 mod stmt;
 mod types;
