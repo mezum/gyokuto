@@ -141,25 +141,26 @@ fn is_pattern_white_space(c: char) -> bool {
 mod tests {
     use super::*;
     use crate::ast::{FloatSuffix, IntSuffix};
+    use crate::error::LiteralError;
     use logos::Logos;
 
-    fn lit(src: &str) -> Result<Lit, &'static str> {
+    fn lit(src: &str) -> Result<Lit, LiteralError> {
         let (token, span) = Token::lexer(src).spanned().next().unwrap();
         decode(token.unwrap(), &src[span])
     }
 
-    fn int(value: u64, suffix: Option<IntSuffix>) -> Result<Lit, &'static str> {
+    fn int(value: u64, suffix: Option<IntSuffix>) -> Result<Lit, LiteralError> {
         Ok(Lit::Int { value, suffix })
     }
 
-    fn float(digits: &str, suffix: Option<FloatSuffix>) -> Result<Lit, &'static str> {
+    fn float(digits: &str, suffix: Option<FloatSuffix>) -> Result<Lit, LiteralError> {
         Ok(Lit::Float {
             digits: digits.to_string(),
             suffix,
         })
     }
 
-    fn str(value: &str) -> Result<Lit, &'static str> {
+    fn str(value: &str) -> Result<Lit, LiteralError> {
         Ok(Lit::Str(value.to_string()))
     }
 
@@ -174,7 +175,10 @@ mod tests {
         assert_eq!(lit("0xffusize"), int(255, Some(IntSuffix::Usize)));
         assert_eq!(lit("1i64"), int(1, Some(IntSuffix::I64)));
         assert_eq!(lit("18446744073709551615"), int(u64::MAX, None));
-        assert!(lit("18446744073709551616").is_err());
+        assert_eq!(
+            lit("18446744073709551616"),
+            Err(LiteralError::IntegerTooLarge)
+        );
     }
 
     #[test]
@@ -249,19 +253,19 @@ mod tests {
 
     #[test]
     fn malformed_input_is_error_instead_of_panic() {
-        for (token, text) in [
-            (Token::Str, r#""\x80""#),
-            (Token::Str, r#""\q""#),
-            (Token::Str, r#""\xZZ""#),
-            (Token::Str, r#""\u{D800}""#),
-            (Token::Str, r#"""#),
-            (Token::Char, "''"),
-            (Token::Char, "'ab'"),
-            (Token::Byte, "b''"),
-            (Token::RawStr, "r#"),
-            (Token::Ident, "a"),
+        for (token, text, error) in [
+            (Token::Str, r#""\x80""#, LiteralError::InvalidUtf8),
+            (Token::Str, r#""\q""#, LiteralError::InvalidEscape),
+            (Token::Str, r#""\xZZ""#, LiteralError::InvalidEscape),
+            (Token::Str, r#""\u{D800}""#, LiteralError::InvalidEscape),
+            (Token::Str, r#"""#, LiteralError::Malformed),
+            (Token::Char, "''", LiteralError::Malformed),
+            (Token::Char, "'ab'", LiteralError::Malformed),
+            (Token::Byte, "b''", LiteralError::Malformed),
+            (Token::RawStr, "r#", LiteralError::Malformed),
+            (Token::Ident, "a", LiteralError::NotALiteral),
         ] {
-            assert!(decode(token, text).is_err(), "{token:?} {text}");
+            assert_eq!(decode(token, text), Err(error), "{token:?} {text}");
         }
     }
 

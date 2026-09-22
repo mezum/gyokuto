@@ -171,6 +171,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::{ErrorKind, Expected, LiteralError};
+    use gyokuto_lexer::LexError;
 
     fn show(expr: &Expr) -> String {
         let list = |name: &str, exprs: &[&Expr]| {
@@ -231,7 +233,11 @@ mod tests {
     fn too_large_integer_is_error() {
         let (expr, errors) = parse_expr("[18446744073709551616, a]");
         assert_eq!(errors.len(), 1, "{errors:?}");
-        assert_eq!(errors[0].span().into_range(), 1..21);
+        assert_eq!(errors[0].span.into_range(), 1..21);
+        assert_eq!(
+            errors[0].kind,
+            ErrorKind::Literal(LiteralError::IntegerTooLarge)
+        );
         assert_eq!(show(&expr.unwrap()), "(array error a)");
     }
 
@@ -275,7 +281,8 @@ mod tests {
     fn lexical_errors_are_reported() {
         let (expr, errors) = parse_expr("$");
         assert_eq!(errors.len(), 1, "{errors:?}");
-        assert_eq!(errors[0].span().into_range(), 0..1);
+        assert_eq!(errors[0].span.into_range(), 0..1);
+        assert_eq!(errors[0].kind, ErrorKind::Lex(LexError::UnexpectedChar));
         assert_eq!(show(&expr.unwrap()), "error");
     }
 
@@ -328,6 +335,15 @@ mod tests {
     fn recovers_inside_delimiters() {
         let (expr, errors) = parse_expr("[(a b), c]");
         assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].span.into_range(), 4..5);
+        assert!(
+            matches!(
+                &errors[0].kind,
+                ErrorKind::Syntax { found: Some(Token::Ident), expected }
+                    if expected.contains(&Expected::Token(Token::RParen))
+            ),
+            "{errors:?}"
+        );
         assert_eq!(show(&expr.unwrap()), "(array error c)");
     }
 

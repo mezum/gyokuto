@@ -96,6 +96,7 @@ dependencies = [
  "chumsky",
  "gyokuto-lexer",
  "logos",
+ "thiserror",
 ]
 
 [[package]]

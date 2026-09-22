@@ -1,7 +1,9 @@
 //! 構文解析。仕様は `docs/spec/syntax.md` を参照。
 
 pub mod ast;
+mod error;
 mod literal;
 mod parser;
 
-pub use parser::{Error, parse_expr};
+pub use error::{Error, ErrorKind, Expected, LiteralError};
+pub use parser::parse_expr;
