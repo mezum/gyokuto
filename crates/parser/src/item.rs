@@ -318,6 +318,50 @@ mod tests {
         assert_eq!(items.join(" "), expected);
     }
 
+    #[rstest]
+    #[case("struct P;", "(struct P)")]
+    #[case("struct P {}", "(struct P (fields))")]
+    #[case("struct P { x: A, y: B, }", "(struct P (fields (: x A) (: y B)))")]
+    #[case("struct P();", "(struct P (tuple))")]
+    #[case("struct P(A, B,);", "(struct P (tuple A B))")]
+    #[case(
+        "struct P<T: A, const N: usize> { x: [T; N] }",
+        "(struct P (generics (: T A) (const N usize)) (fields (: x (array T N))))"
+    )]
+    #[case(
+        "struct P<T> where T: A { x: T }",
+        "(struct P (generics T) (where (: T A)) (fields (: x T)))"
+    )]
+    #[case(
+        "struct P<T>(T) where T: A;",
+        "(struct P (generics T) (where (: T A)) (tuple T))"
+    )]
+    #[case("struct P<T> where T: A;", "(struct P (generics T) (where (: T A)))")]
+    fn struct_item(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("extern struct P;", "(extern struct P)")]
+    #[case("extern struct P { x: A }", "(extern struct P (fields (: x A)))")]
+    #[case("extern struct P(A);", "(extern struct P (tuple A))")]
+    fn extern_struct(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("struct P")]
+    #[case("struct P {};")]
+    #[case("struct P()")]
+    #[case("struct P(A) {}")]
+    #[case("struct P { x }")]
+    #[case("struct P { x: A y: B }")]
+    #[case("struct { x: A }")]
+    #[case("extern struct P")]
+    fn invalid_struct(#[case] src: &str) {
+        assert!(!parse_module(src).1.is_empty());
+    }
+
     #[test]
     fn deeply_nested_self_params() {
         let src = format!(
