@@ -1,7 +1,7 @@
-use crate::ast::{BinaryOp, Expr, ExprKind, Lit, Path, PathSegment, Span, UnaryOp};
+use crate::ast::{BinaryOp, Expr, ExprKind, Field, Lit, Path, PathSegment, Span, UnaryOp};
 use crate::error::Error;
 use crate::literal;
-use chumsky::pratt::{Associativity, Operator, infix, left, none, prefix};
+use chumsky::pratt::{Associativity, Operator, infix, left, none, postfix, prefix};
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
 use logos::Logos;
@@ -153,6 +153,61 @@ where
             error,
         )));
 
+        #[derive(Clone)]
+        enum PostfixOp {
+            Call(Vec<Expr>),
+            Method(String, Vec<Expr>),
+            Field(Field),
+            Index(Expr),
+            Try,
+        }
+        let args = expr
+            .clone()
+            .separated_by(just(Token::Comma))
+            .allow_trailing()
+            .collect::<Vec<_>>()
+            .delimited_by(just(Token::LParen), just(Token::RParen));
+        let ident = just(Token::Ident)
+            .to_span()
+            .map(move |span: Span| src[span.into_range()].to_string());
+        let postfix_op = postfix(
+            12,
+            choice((
+                args.clone().map(PostfixOp::Call),
+                just(Token::Dot)
+                    .ignore_then(ident)
+                    .then(args)
+                    .map(|(method, args)| PostfixOp::Method(method, args)),
+                just(Token::Dot)
+                    .ignore_then(ident)
+                    .map(|name| PostfixOp::Field(Field::Named(name))),
+                expr.clone()
+                    .delimited_by(just(Token::LBracket), just(Token::RBracket))
+                    .map(PostfixOp::Index),
+                just(Token::Question).to(PostfixOp::Try),
+            )),
+            |lhs, op, e| {
+                let lhs = Box::new(lhs);
+                let kind = match op {
+                    PostfixOp::Call(args) => ExprKind::Call { callee: lhs, args },
+                    PostfixOp::Method(method, args) => ExprKind::MethodCall {
+                        receiver: lhs,
+                        method,
+                        args,
+                    },
+                    PostfixOp::Field(field) => ExprKind::Field { expr: lhs, field },
+                    PostfixOp::Index(index) => ExprKind::Index {
+                        expr: lhs,
+                        index: Box::new(index),
+                    },
+                    PostfixOp::Try => ExprKind::Try(lhs),
+                };
+                Expr {
+                    kind,
+                    span: e.span(),
+                }
+            },
+        );
         let unary = prefix(
             11,
             choice((
@@ -173,6 +228,7 @@ where
             },
         );
         let ops = atom.pratt((
+            postfix_op,
             unary,
             binary(
                 left(10),
