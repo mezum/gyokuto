@@ -246,13 +246,28 @@ mod tests {
 
     #[test]
     fn invalid_types() {
-        for src in ["Vec<", "a::", "[T; ]", "&", "(A B)", "1", "Vec<a + b>"] {
+        for src in [
+            "Vec<",
+            "a::",
+            "1",
+            "Vec<a + b>",
+            "Vec<T",
+            "[T; ]",
+            "&",
+            "(A B)",
+        ] {
             assert!(!parse_type(src).1.is_empty(), "{src}");
         }
     }
 
     #[test]
     fn type_spans() {
+        let (ty, _) = parse_type(" Vec<T> ");
+        assert_eq!(ty.unwrap().span.into_range(), 1..7);
+    }
+
+    #[test]
+    fn reference_type_spans() {
         let (ty, _) = parse_type(" &mut T ");
         assert_eq!(ty.unwrap().span.into_range(), 1..7);
     }
