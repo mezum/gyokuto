@@ -20,6 +20,32 @@ pub enum ExprKind {
         elem: Box<Expr>,
         len: Box<Expr>,
     },
+    Call {
+        callee: Box<Expr>,
+        args: Vec<Expr>,
+    },
+    MethodCall {
+        receiver: Box<Expr>,
+        method: String,
+        /// `a.f::<T>()` の型引数
+        generics: Option<GenericArgs>,
+        args: Vec<Expr>,
+    },
+    Field {
+        expr: Box<Expr>,
+        field: Field,
+    },
+    Index {
+        expr: Box<Expr>,
+        index: Box<Expr>,
+    },
+    /// `expr?`
+    Try(Box<Expr>),
+    /// `expr as ty`
+    Cast {
+        expr: Box<Expr>,
+        ty: Box<Type>,
+    },
     Unary {
         op: UnaryOp,
         expr: Box<Expr>,
@@ -43,6 +69,74 @@ pub enum ExprKind {
     },
     /// 構文エラーから回復した箇所
     Error,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Field {
+    Named(String),
+    /// タプルのフィールド `t.0`
+    Index(usize),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Type {
+    pub kind: TypeKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeKind {
+    Path(Path),
+    Ref {
+        mutable: bool,
+        ty: Box<Type>,
+    },
+    Paren(Box<Type>),
+    Tuple(Vec<Type>),
+    /// `[elem; len]`
+    Array {
+        elem: Box<Type>,
+        len: Box<Expr>,
+    },
+    Slice(Box<Type>),
+    /// `fn(params) -> ret`。`ret` が無い場合はユニット型
+    Fn {
+        params: Vec<Type>,
+        ret: Option<Box<Type>>,
+    },
+    /// `dyn A + B`
+    Dyn(Vec<Path>),
+    /// `impl A + B`
+    Impl(Vec<Path>),
+    /// `!`
+    Never,
+    /// `_`
+    Infer,
+    /// 構文エラーから回復した箇所
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GenericArgs {
+    /// `<A, B>`
+    Angle(Vec<GenericArg>),
+    /// `Fn(A, B) -> C`
+    Paren {
+        inputs: Vec<Type>,
+        output: Option<Box<Type>>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GenericArg {
+    Type(Type),
+    /// 関連型の指定 `Item = T`
+    Binding {
+        name: String,
+        ty: Type,
+    },
+    /// const generics の定数
+    Const(Expr),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,10 +214,29 @@ pub struct Path {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum PathSegment {
+pub struct PathSegment {
+    pub name: PathName,
+    pub args: Option<GenericArgs>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PathName {
     Ident(String),
     Crate,
     Super,
     SelfValue,
     SelfType,
+}
+
+impl PathName {
+    /// ソース上の表記を得る
+    pub fn as_str(&self) -> &str {
+        match self {
+            PathName::Ident(name) => name,
+            PathName::Crate => "crate",
+            PathName::Super => "super",
+            PathName::SelfValue => "self",
+            PathName::SelfType => "Self",
+        }
+    }
 }

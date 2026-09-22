@@ -1,13 +1,16 @@
-use crate::ast::{BinaryOp, Expr, ExprKind, Lit, Path, PathSegment, Span, UnaryOp};
-use crate::error::Error;
+use crate::ast::{
+    BinaryOp, Expr, ExprKind, Field, GenericArgs, Lit, Path, PathName, PathSegment, Span, UnaryOp,
+};
+use crate::error::{Error, ErrorKind};
 use crate::literal;
-use chumsky::pratt::{Associativity, Operator, infix, left, none, prefix};
+use crate::types::{angle_args, ty, ty_no_bounds};
+use chumsky::pratt::{Associativity, Operator, infix, left, none, postfix, prefix};
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
 use logos::Logos;
 use std::iter::once;
 
-type Extra = extra::Err<Error>;
+pub(crate) type Extra = extra::Err<Error>;
 
 /// 式を解析する
 pub fn parse_expr(src: &str) -> (Option<Expr>, Vec<Error>) {
@@ -21,6 +24,9 @@ pub fn parse_expr(src: &str) -> (Option<Expr>, Vec<Error>) {
 }
 
 /// 字句解析し、エラーのトークンを `Token::Error` に置き換えたトークン列と字句解析のエラーを得る
+///
+/// 型引数を閉じる `>` を取り出せるように、`>` で始まるトークンは 1 文字ずつに分割する。
+/// 演算子としては、隙間なく並んだ分割後のトークンを [`glued`] で 1 つにまとめて解析する。
 pub(crate) fn lex(src: &str) -> (Vec<(Token, Span)>, Vec<Error>) {
     let lexed: Vec<_> = Token::lexer(src)
         .spanned()
@@ -28,7 +34,19 @@ pub(crate) fn lex(src: &str) -> (Vec<(Token, Span)>, Vec<Error>) {
         .collect();
     let tokens: Vec<(Token, Span)> = lexed
         .iter()
-        .map(|&(token, span)| (token.unwrap_or(Token::Error), span))
+        .flat_map(|&(token, span)| {
+            let parts = match token {
+                Ok(Token::Shr) => vec![Token::Gt, Token::Gt],
+                Ok(Token::Ge) => vec![Token::Gt, Token::Eq],
+                Ok(Token::ShrEq) => vec![Token::Gt, Token::Gt, Token::Eq],
+                _ => return vec![(token.unwrap_or(Token::Error), span)],
+            };
+            parts
+                .into_iter()
+                .enumerate()
+                .map(move |(i, part)| (part, Span::from(span.start + i..span.start + i + 1)))
+                .collect()
+        })
         .collect();
     let errors = lexed
         .iter()
@@ -51,11 +69,12 @@ pub(crate) fn input<'tok>(
     tokens.map(eoi, |(token, span)| (token, span))
 }
 
-fn expr<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, Expr, Extra> + Clone
+pub(crate) fn expr<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, Expr, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
     recursive(|expr| {
+        let turbofish = just(Token::ColonColon).ignore_then(angle_args(src, ty(src, expr.clone())));
         let rest_items = just(Token::Comma).ignore_then(
             expr.clone()
                 .separated_by(just(Token::Comma))
@@ -106,11 +125,7 @@ where
         };
         let atom = choice((
             literal(src),
-            path(src, empty()).map(|segments| {
-                ExprKind::Path(Path {
-                    segments: segments.into_iter().map(|(segment, ())| segment).collect(),
-                })
-            }),
+            path(src, turbofish.clone().or_not()).map(ExprKind::Path),
             parens,
             array,
             just(Token::Error).to(ExprKind::Error),
@@ -138,8 +153,98 @@ where
             error,
         )));
 
-        let unary = prefix(
+        #[derive(Clone)]
+        enum PostfixOp {
+            Call(Vec<Expr>),
+            Method(String, Option<GenericArgs>, Vec<Expr>),
+            Field(Field),
+            /// `t.0.1` のようにまとめて字句解析されたタプルのフィールドと、各フィールドの終端の位置
+            TupleFields(Vec<(usize, usize)>),
+            Index(Expr),
+            Try,
+        }
+        let args = expr
+            .clone()
+            .separated_by(just(Token::Comma))
+            .allow_trailing()
+            .collect::<Vec<_>>()
+            .delimited_by(just(Token::LParen), just(Token::RParen));
+        let ident = just(Token::Ident)
+            .to_span()
+            .map(move |span: Span| src[span.into_range()].to_string());
+        let postfix_op = postfix(
+            13,
+            choice((
+                args.clone().map(PostfixOp::Call),
+                just(Token::Dot)
+                    .ignore_then(ident)
+                    .then(turbofish.clone().or_not())
+                    .then(args)
+                    .map(|((method, generics), args)| PostfixOp::Method(method, generics, args)),
+                just(Token::Dot)
+                    .ignore_then(ident)
+                    .map(|name| PostfixOp::Field(Field::Named(name))),
+                just(Token::Dot)
+                    .ignore_then(one_of([Token::Int, Token::Float]).to_span())
+                    .validate(move |span: Span, _, emitter| {
+                        tuple_indices(&src[span.into_range()], span.start).unwrap_or_else(|| {
+                            emitter.emit(Error {
+                                span,
+                                kind: ErrorKind::InvalidTupleIndex,
+                            });
+                            Vec::new()
+                        })
+                    })
+                    .map(PostfixOp::TupleFields),
+                expr.clone()
+                    .delimited_by(just(Token::LBracket), just(Token::RBracket))
+                    .map(PostfixOp::Index),
+                just(Token::Question).to(PostfixOp::Try),
+            )),
+            |lhs: Expr, op, e| {
+                let start = lhs.span.start;
+                let span = e.span();
+                let wrap = |kind| Expr { kind, span };
+                let lhs = Box::new(lhs);
+                match op {
+                    PostfixOp::Call(args) => wrap(ExprKind::Call { callee: lhs, args }),
+                    PostfixOp::Method(method, generics, args) => wrap(ExprKind::MethodCall {
+                        receiver: lhs,
+                        method,
+                        generics,
+                        args,
+                    }),
+                    PostfixOp::Field(field) => wrap(ExprKind::Field { expr: lhs, field }),
+                    PostfixOp::TupleFields(fields) => {
+                        fields.into_iter().fold(*lhs, |expr, (index, end)| Expr {
+                            kind: ExprKind::Field {
+                                expr: Box::new(expr),
+                                field: Field::Index(index),
+                            },
+                            span: Span::from(start..end),
+                        })
+                    }
+                    PostfixOp::Index(index) => wrap(ExprKind::Index {
+                        expr: lhs,
+                        index: Box::new(index),
+                    }),
+                    PostfixOp::Try => wrap(ExprKind::Try(lhs)),
+                }
+            },
+        );
+        let cast = postfix(
             11,
+            just(Token::As).ignore_then(ty_no_bounds(src, expr.clone())),
+            |expr, ty, e| Expr {
+                kind: ExprKind::Cast {
+                    expr: Box::new(expr),
+                    ty: Box::new(ty),
+                },
+                span: e.span(),
+            },
+        );
+        let unary = prefix(
+            12,
             choice((
                 just(Token::Amp).then(just(Token::Mut)).to(UnaryOp::RefMut),
                 select! {
@@ -158,7 +263,9 @@ where
             },
         );
         let ops = atom.pratt((
+            postfix_op,
             unary,
+            cast,
             binary(
                 left(10),
                 select! {
@@ -178,8 +285,8 @@ where
                 left(8),
                 select! {
                     Token::Shl => BinaryOp::Shl,
-                    Token::Shr => BinaryOp::Shr,
-                },
+                }
+                .or(glued(&[Token::Gt, Token::Gt]).to(BinaryOp::Shr)),
             ),
             binary(left(7), just(Token::Amp).to(BinaryOp::BitAnd)),
             binary(left(6), just(Token::Caret).to(BinaryOp::BitXor)),
@@ -190,10 +297,10 @@ where
                     Token::EqEq => BinaryOp::Eq,
                     Token::Ne => BinaryOp::Ne,
                     Token::Lt => BinaryOp::Lt,
-                    Token::Gt => BinaryOp::Gt,
                     Token::Le => BinaryOp::Le,
-                    Token::Ge => BinaryOp::Ge,
-                },
+                }
+                .or(glued(&[Token::Gt]).to(BinaryOp::Gt))
+                .or(glued(&[Token::Gt, Token::Eq]).to(BinaryOp::Ge)),
             ),
             binary(left(3), just(Token::AndAnd).to(BinaryOp::And)),
             binary(left(2), just(Token::OrOr).to(BinaryOp::Or)),
@@ -238,8 +345,8 @@ where
             Token::PipeEq => Some(BinaryOp::BitOr),
             Token::CaretEq => Some(BinaryOp::BitXor),
             Token::ShlEq => Some(BinaryOp::Shl),
-            Token::ShrEq => Some(BinaryOp::Shr),
-        };
+        }
+        .or(glued(&[Token::Gt, Token::Gt, Token::Eq]).to(Some(BinaryOp::Shr)));
         range
             .then(assign_op.then(expr).or_not())
             .map_with(|(place, assign), e| match assign {
@@ -254,6 +361,48 @@ where
                 },
             })
     })
+}
+
+/// タプルのフィールドの並び `0` / `0.1` を、各フィールドの値と終端の位置に分ける
+///
+/// フィールドは `_`・サフィックス・先頭の `0` などを含まない 10 進数に限る
+fn tuple_indices(text: &str, offset: usize) -> Option<Vec<(usize, usize)>> {
+    text.split('.')
+        .scan(offset, |start, digits| {
+            let end = *start + digits.len();
+            *start = end + 1;
+            Some((digits, end))
+        })
+        .map(|(digits, end)| {
+            let decimal = digits.bytes().all(|b| b.is_ascii_digit());
+            let canonical = digits == "0" || !digits.starts_with('0');
+            let index = digits.parse().ok().filter(|_| decimal && canonical)?;
+            Some((index, end))
+        })
+        .collect()
+}
+
+/// 分割された `>` で始まるトークンが、隙間なく `tokens` の通りに並んでいるものを 1 つの演算子として解析する
+fn glued<'tok, I>(tokens: &'static [Token]) -> impl Parser<'tok, I, (), Extra> + Clone
+where
+    I: ValueInput<'tok, Token = Token, Span = Span>,
+{
+    let spanned = any().map_with(|token, e| (token, e.span()));
+    spanned
+        .repeated()
+        .exactly(tokens.len())
+        .collect::<Vec<(Token, Span)>>()
+        .then(spanned.rewind().or_not())
+        .filter(move |(parts, next)| {
+            let joined = |a: &Span, b: &Span| a.end == b.start;
+            parts.iter().map(|(token, _)| token).eq(tokens)
+                && parts.windows(2).all(|w| joined(&w[0].1, &w[1].1))
+                && !matches!(
+                    (parts.last(), next),
+                    (Some((_, last)), Some((Token::Gt | Token::Eq, span))) if joined(last, span)
+                )
+        })
+        .ignored()
 }
 
 fn binary<'tok, I>(
@@ -309,40 +458,42 @@ where
     choice((bool_lit, lit))
 }
 
-/// パスを解析する。各セグメントの後には `args` を続けて解析する
-pub(crate) fn path<'tok, 'src: 'tok, I, O>(
+/// パスを解析する。各セグメントの後には型引数として `args` を続けて解析する
+pub(crate) fn path<'tok, 'src: 'tok, I>(
     src: &'src str,
-    args: impl Parser<'tok, I, O, Extra> + Clone,
-) -> impl Parser<'tok, I, Vec<(PathSegment, O)>, Extra> + Clone
+    args: impl Parser<'tok, I, Option<GenericArgs>, Extra> + Clone,
+) -> impl Parser<'tok, I, Path, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
+    let segment = |(name, args)| PathSegment { name, args };
     let ident = just(Token::Ident)
         .to_span()
-        .map(move |span: Span| PathSegment::Ident(src[span.into_range()].to_string()));
+        .map(move |span: Span| PathName::Ident(src[span.into_range()].to_string()));
     let head = choice((
         just(Token::Super)
-            .to(PathSegment::Super)
+            .to(PathName::Super)
             .then(args.clone())
+            .map(segment)
             .separated_by(just(Token::ColonColon))
             .at_least(1)
             .collect(),
         choice((
-            just(Token::Crate).to(PathSegment::Crate),
-            just(Token::SelfValue).to(PathSegment::SelfValue),
-            just(Token::SelfType).to(PathSegment::SelfType),
+            just(Token::Crate).to(PathName::Crate),
+            just(Token::SelfValue).to(PathName::SelfValue),
+            just(Token::SelfType).to(PathName::SelfType),
             ident,
         ))
         .then(args.clone())
-        .map(|segment| vec![segment]),
+        .map(move |name_args| vec![segment(name_args)]),
     ));
     let rest = just(Token::ColonColon)
-        .ignore_then(ident.then(args))
+        .ignore_then(ident.then(args).map(segment))
         .repeated()
         .collect::<Vec<_>>();
     head.then(rest).map(|(mut segments, rest)| {
         segments.extend(rest);
-        segments
+        Path { segments }
     })
 }
 
@@ -350,55 +501,13 @@ where
 mod tests {
     use super::*;
     use crate::error::{ErrorKind, Expected, Found, LiteralError};
+    use crate::sexpr::AsSexpr;
     use gyokuto_lexer::LexError;
-
-    fn show(expr: &Expr) -> String {
-        let list = |name: &str, exprs: &[&Expr]| {
-            let items: String = exprs.iter().map(|e| format!(" {}", show(e))).collect();
-            format!("({name}{items})")
-        };
-        match &expr.kind {
-            ExprKind::Lit(Lit::Bool(b)) => b.to_string(),
-            ExprKind::Lit(lit) => format!("{lit:?}"),
-            ExprKind::Path(path) => path
-                .segments
-                .iter()
-                .map(|s| match s {
-                    PathSegment::Ident(name) => name.as_str(),
-                    PathSegment::Crate => "crate",
-                    PathSegment::Super => "super",
-                    PathSegment::SelfValue => "self",
-                    PathSegment::SelfType => "Self",
-                })
-                .collect::<Vec<_>>()
-                .join("::"),
-            ExprKind::Paren(e) => list("paren", &[e]),
-            ExprKind::Tuple(es) => list("tuple", &es.iter().collect::<Vec<_>>()),
-            ExprKind::Array(es) => list("array", &es.iter().collect::<Vec<_>>()),
-            ExprKind::Repeat { elem, len } => list("repeat", &[elem, len]),
-            ExprKind::Unary { op, expr } => list(&format!("{op:?}"), &[expr]),
-            ExprKind::Binary { op, lhs, rhs } => list(&format!("{op:?}"), &[lhs, rhs]),
-            ExprKind::Range {
-                start,
-                end,
-                inclusive,
-            } => {
-                let end_point = |e: &Option<Box<Expr>>| e.as_deref().map_or("_".to_string(), show);
-                let op = if *inclusive { "..=" } else { ".." };
-                format!("({op} {} {})", end_point(start), end_point(end))
-            }
-            ExprKind::Assign { op, place, value } => {
-                let op = op.map_or(String::new(), |op| format!("{op:?}"));
-                list(&format!("{op}="), &[place, value])
-            }
-            ExprKind::Error => "error".to_string(),
-        }
-    }
 
     fn parse_ok(src: &str) -> String {
         let (expr, errors) = parse_expr(src);
         assert!(errors.is_empty(), "{src}: {errors:?}");
-        show(&expr.unwrap())
+        expr.unwrap().as_sexpr()
     }
 
     #[test]
@@ -431,7 +540,7 @@ mod tests {
             errors[0].kind,
             ErrorKind::Literal(LiteralError::IntegerTooLarge)
         );
-        assert_eq!(show(&expr.unwrap()), "(array error a)");
+        assert_eq!(expr.unwrap().as_sexpr(), "(array error a)");
     }
 
     #[test]
@@ -476,7 +585,7 @@ mod tests {
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert_eq!(errors[0].span.into_range(), 0..1);
         assert_eq!(errors[0].kind, ErrorKind::Lex(LexError::UnexpectedChar));
-        assert_eq!(show(&expr.unwrap()), "error");
+        assert_eq!(expr.unwrap().as_sexpr(), "error");
     }
 
     #[test]
@@ -537,14 +646,14 @@ mod tests {
             ),
             "{errors:?}"
         );
-        assert_eq!(show(&expr.unwrap()), "(array error c)");
+        assert_eq!(expr.unwrap().as_sexpr(), "(array error c)");
     }
 
     #[test]
     fn lexical_error_inside_delimiters() {
         let (expr, errors) = parse_expr("[a, $]");
         assert_eq!(errors.len(), 1, "{errors:?}");
-        assert_eq!(show(&expr.unwrap()), "(array a error)");
+        assert_eq!(expr.unwrap().as_sexpr(), "(array a error)");
     }
 
     #[test]
@@ -618,6 +727,18 @@ mod tests {
     }
 
     #[test]
+    fn operators_starting_with_gt_without_spaces() {
+        assert_eq!(parse_ok("a>b"), "(Gt a b)");
+        assert_eq!(parse_ok("a>=b"), "(Ge a b)");
+        assert_eq!(parse_ok("a>>b"), "(Shr a b)");
+        assert_eq!(parse_ok("a>>=b"), "(Shr= a b)");
+        assert_eq!(parse_expr("a>>b").0.unwrap().span.into_range(), 0..4);
+        for src in ["a > > b", "a > = b", "a >> = b", "a > >= b"] {
+            assert!(!parse_expr(src).1.is_empty(), "{src}");
+        }
+    }
+
+    #[test]
     fn comparisons_do_not_chain() {
         for src in ["a < b < c", "a == b == c", "a < b == c", "(a < b > c)"] {
             assert!(!parse_expr(src).1.is_empty(), "{src}");
@@ -685,6 +806,279 @@ mod tests {
         assert_eq!(parse_ok("a = b..c"), "(= a (.. b c))");
         assert_eq!(parse_ok("a += b || c"), "(Add= a (Or b c))");
         assert_eq!(parse_ok("*a = -b"), "(= (Deref a) (Neg b))");
+    }
+
+    #[test]
+    fn call_without_args() {
+        assert_eq!(parse_ok("f()"), "(call f)");
+    }
+
+    #[test]
+    fn call_with_args() {
+        assert_eq!(parse_ok("f(a, b,)"), "(call f a b)");
+    }
+
+    #[test]
+    fn chained_calls() {
+        assert_eq!(parse_ok("f(a)(b)"), "(call (call f a) b)");
+    }
+
+    #[test]
+    fn method_call_without_args() {
+        assert_eq!(parse_ok("a.f()"), "(method a f)");
+    }
+
+    #[test]
+    fn method_call_with_args() {
+        assert_eq!(parse_ok("a.f(b, c)"), "(method a f b c)");
+    }
+
+    #[test]
+    fn named_field() {
+        assert_eq!(parse_ok("a.b"), "(field a b)");
+    }
+
+    #[test]
+    fn chained_fields() {
+        assert_eq!(parse_ok("a.b.c"), "(field (field a b) c)");
+    }
+
+    #[test]
+    fn index() {
+        assert_eq!(parse_ok("a[i]"), "(index a i)");
+    }
+
+    #[test]
+    fn chained_index() {
+        assert_eq!(parse_ok("a[i][j]"), "(index (index a i) j)");
+    }
+
+    #[test]
+    fn try_operator() {
+        assert_eq!(parse_ok("a?"), "(? a)");
+    }
+
+    #[test]
+    fn try_after_method_call() {
+        assert_eq!(parse_ok("a.f()?"), "(? (method a f))");
+    }
+
+    #[test]
+    fn calling_field_needs_parens() {
+        assert_eq!(parse_ok("(a.f)(b)"), "(call (paren (field a f)) b)");
+    }
+
+    #[test]
+    fn postfix_binds_tighter_than_neg() {
+        assert_eq!(parse_ok("-a.b"), "(Neg (field a b))");
+    }
+
+    #[test]
+    fn postfix_binds_tighter_than_deref() {
+        assert_eq!(parse_ok("*a?"), "(Deref (? a))");
+    }
+
+    #[test]
+    fn postfix_in_binary() {
+        assert_eq!(parse_ok("a.b + c[d]"), "(Add (field a b) (index c d))");
+    }
+
+    #[test]
+    fn call_args_need_commas() {
+        assert!(!parse_expr("f(a b)").1.is_empty());
+    }
+
+    #[test]
+    fn field_needs_name() {
+        assert!(!parse_expr("a.").1.is_empty());
+    }
+
+    #[test]
+    fn index_needs_expr() {
+        assert!(!parse_expr("a[]").1.is_empty());
+    }
+
+    #[test]
+    fn index_takes_one_expr() {
+        assert!(!parse_expr("a[i, j]").1.is_empty());
+    }
+
+    #[test]
+    fn postfix_spans() {
+        let expr = parse_expr("a.b(c)").0.unwrap();
+        let ExprKind::MethodCall { receiver, .. } = &expr.kind else {
+            panic!("{expr:?}");
+        };
+        assert_eq!(expr.span.into_range(), 0..6);
+        assert_eq!(receiver.span.into_range(), 0..1);
+    }
+
+    #[test]
+    fn tuple_field() {
+        assert_eq!(parse_ok("t.0"), "(field t 0)");
+    }
+
+    #[test]
+    fn tuple_field_with_multiple_digits() {
+        assert_eq!(parse_ok("t.12"), "(field t 12)");
+    }
+
+    #[test]
+    fn nested_tuple_fields() {
+        assert_eq!(parse_ok("t.0.1"), "(field (field t 0) 1)");
+    }
+
+    #[test]
+    fn deeply_nested_tuple_fields() {
+        assert_eq!(parse_ok("t.1.2.3"), "(field (field (field t 1) 2) 3)");
+    }
+
+    #[test]
+    fn tuple_field_after_whitespace() {
+        assert_eq!(parse_ok("t. /* c */ 0"), "(field t 0)");
+    }
+
+    #[test]
+    fn method_call_on_tuple_field() {
+        assert_eq!(parse_ok("t.0.f()"), "(method (field t 0) f)");
+    }
+
+    #[test]
+    fn tuple_index_with_suffix() {
+        assert_invalid_tuple_index("t.0u8");
+    }
+
+    #[test]
+    fn tuple_index_with_leading_zero() {
+        assert_invalid_tuple_index("t.01");
+    }
+
+    #[test]
+    fn tuple_index_with_underscore() {
+        assert_invalid_tuple_index("t.1_0");
+    }
+
+    #[test]
+    fn tuple_index_in_hex() {
+        assert_invalid_tuple_index("t.0x1");
+    }
+
+    #[test]
+    fn nested_tuple_index_with_exponent() {
+        assert_invalid_tuple_index("t.0.1e1");
+    }
+
+    #[test]
+    fn nested_tuple_index_with_suffix() {
+        assert_invalid_tuple_index("t.0.1f32");
+    }
+
+    #[test]
+    fn nested_tuple_index_with_leading_zero() {
+        assert_invalid_tuple_index("t.0.01");
+    }
+
+    fn assert_invalid_tuple_index(src: &str) {
+        let kinds: Vec<_> = parse_expr(src).1.into_iter().map(|e| e.kind).collect();
+        assert_eq!(kinds, [ErrorKind::InvalidTupleIndex], "{src}");
+    }
+
+    #[test]
+    fn nested_tuple_field_spans() {
+        let expr = parse_expr("t.0.1").0.unwrap();
+        let ExprKind::Field { expr: inner, .. } = &expr.kind else {
+            panic!("{expr:?}");
+        };
+        assert_eq!(expr.span.into_range(), 0..5);
+        assert_eq!(inner.span.into_range(), 0..3);
+    }
+
+    #[test]
+    fn path_with_turbofish() {
+        assert_eq!(parse_ok("Vec::<i32>::new"), "Vec<i32>::new");
+    }
+
+    #[test]
+    fn call_with_turbofish() {
+        assert_eq!(parse_ok("parse::<i32>(s)"), "(call parse<i32> s)");
+    }
+
+    #[test]
+    fn method_call_with_turbofish() {
+        assert_eq!(parse_ok("a.f::<T, U>(b)"), "(method a f<T, U> b)");
+    }
+
+    #[test]
+    fn turbofish_with_nested_generics() {
+        assert_eq!(
+            parse_ok("Vec::<Vec<i32>>::new()"),
+            "(call Vec<Vec<i32>>::new)"
+        );
+    }
+
+    #[test]
+    fn generic_args_in_expr_need_colons() {
+        assert!(!parse_expr("f<T>()").1.is_empty());
+    }
+
+    #[test]
+    fn method_generic_args_need_colons() {
+        assert!(!parse_expr("a.f<T>()").1.is_empty());
+    }
+
+    #[test]
+    fn unterminated_turbofish() {
+        assert!(!parse_expr("a::<T").1.is_empty());
+    }
+
+    #[test]
+    fn cast() {
+        assert_eq!(parse_ok("a as T"), "(as a T)");
+    }
+
+    #[test]
+    fn chained_casts() {
+        assert_eq!(parse_ok("a as T as U"), "(as (as a T) U)");
+    }
+
+    #[test]
+    fn cast_binds_looser_than_neg() {
+        assert_eq!(parse_ok("-a as T"), "(as (Neg a) T)");
+    }
+
+    #[test]
+    fn cast_binds_tighter_than_mul() {
+        assert_eq!(parse_ok("a * b as T"), "(Mul a (as b T))");
+    }
+
+    #[test]
+    fn cast_after_postfix() {
+        assert_eq!(parse_ok("a.b as T"), "(as (field a b) T)");
+    }
+
+    #[test]
+    fn cast_to_generic_type() {
+        assert_eq!(parse_ok("a as Vec<T>"), "(as a Vec<T>)");
+    }
+
+    #[test]
+    fn cast_to_reference() {
+        assert_eq!(parse_ok("a as &T"), "(as a (& T))");
+    }
+
+    #[test]
+    fn cast_in_parens_then_comparison() {
+        assert_eq!(parse_ok("(a as usize) < b"), "(Lt (paren (as a usize)) b)");
+    }
+
+    #[test]
+    fn cast_type_does_not_take_bounds() {
+        assert_eq!(parse_ok("a as dyn A + B"), "(Add (as a (dyn A)) B)");
+    }
+
+    #[test]
+    fn lt_after_cast_starts_generic_args() {
+        assert!(!parse_expr("a as usize < b").1.is_empty());
     }
 
     #[test]
