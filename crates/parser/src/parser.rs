@@ -869,6 +869,30 @@ mod tests {
     }
 
     #[rstest]
+    #[case("S {}", "(struct S)")]
+    #[case("S { x: a, y }", "(struct S (: x a) (: y y))")]
+    #[case("S { x: a, }", "(struct S (: x a))")]
+    #[case("S { ..b }", "(struct S (.. b))")]
+    #[case("S { x, ..b }", "(struct S (: x x) (.. b))")]
+    #[case("E::V { x: a }", "(struct E::V (: x a))")]
+    #[case("S { x: a }.x", "(field (struct S (: x a)) x)")]
+    #[case("{ S { x: a } }", "(block (struct S (: x a)))")]
+    fn struct_expr(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("S { x: }")]
+    #[case("S { x y }")]
+    #[case("S { .. }")]
+    #[case("S { ..b, }")]
+    #[case("S { ..b, x }")]
+    #[case("S { x ..b }")]
+    fn invalid_struct_expr(#[case] src: &str) {
+        assert!(!parse_expr(src).1.is_empty());
+    }
+
+    #[rstest]
     #[case("a..b", "(.. a b)")]
     #[case("a..", "(.. a _)")]
     #[case("..b", "(.. _ b)")]

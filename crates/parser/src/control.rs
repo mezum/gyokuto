@@ -230,6 +230,11 @@ mod tests {
         "(if a (block b) (if c (block d) (block e)))"
     )]
     #[case("if a == b { c }", "(if (Eq a b) (block c))")]
+    #[case("if a == S { b }", "(if (Eq a S) (block b))")]
+    #[case(
+        "if a == (S { b }) {}",
+        "(if (Eq a (paren (struct S (: b b)))) (block))"
+    )]
     #[case("if a.. { b }", "(if (.. a _) (block b))")]
     #[case("if return { a }", "(if (return) (block a))")]
     #[case("if ({ a }) { b }", "(if (paren (block a)) (block b))")]
@@ -255,6 +260,9 @@ mod tests {
     }
 
     #[rstest]
+    #[case("if S { a } {}")]
+    #[case("while S { a } {}")]
+    #[case("match S { a } {}")]
     #[case("if { a } { b }")]
     #[case("if a + { b } { c }")]
     #[case("if a = { b } { c }")]
