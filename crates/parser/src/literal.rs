@@ -142,6 +142,7 @@ mod tests {
     use super::*;
     use crate::ast::{FloatSuffix, IntSuffix};
     use logos::Logos;
+    use rstest::rstest;
 
     fn lit(src: &str) -> Result<Lit, LiteralError> {
         let (token, span) = Token::lexer(src).spanned().next().unwrap();
@@ -163,85 +164,116 @@ mod tests {
         Ok(Lit::Str(value.to_string()))
     }
 
-    #[test]
-    fn integers() {
-        assert_eq!(lit("0"), int(0, None));
-        assert_eq!(lit("1_000"), int(1000, None));
-        assert_eq!(lit("0xff"), int(255, None));
-        assert_eq!(lit("0o17"), int(15, None));
-        assert_eq!(lit("0b1010"), int(10, None));
-        assert_eq!(lit("255u8"), int(255, Some(IntSuffix::U8)));
-        assert_eq!(lit("0xffusize"), int(255, Some(IntSuffix::Usize)));
-        assert_eq!(lit("1i64"), int(1, Some(IntSuffix::I64)));
-        assert_eq!(lit("18446744073709551615"), int(u64::MAX, None));
+    #[rstest]
+    #[case("0", int(0, None))]
+    #[case("1_000", int(1000, None))]
+    #[case("0xff", int(255, None))]
+    #[case("0o17", int(15, None))]
+    #[case("0b1010", int(10, None))]
+    #[case("255u8", int(255, Some(IntSuffix::U8)))]
+    #[case("0xffusize", int(255, Some(IntSuffix::Usize)))]
+    #[case("1i64", int(1, Some(IntSuffix::I64)))]
+    #[case("18446744073709551615", int(u64::MAX, None))]
+    #[case("18446744073709551616", Err(LiteralError::IntegerTooLarge))]
+    fn integer(#[case] src: &str, #[case] expected: Result<Lit, LiteralError>) {
+        assert_eq!(lit(src), expected);
+    }
+
+    #[rstest]
+    #[case("1_000.5", float("1000.5", None))]
+    #[case("2.5E-3f32", float("2.5E-3", Some(FloatSuffix::F32)))]
+    #[case("1f64", float("1", Some(FloatSuffix::F64)))]
+    fn float_literal(#[case] src: &str, #[case] expected: Result<Lit, LiteralError>) {
+        assert_eq!(lit(src), expected);
+    }
+
+    #[rstest]
+    #[case("'a'", Ok(Lit::Char('a')))]
+    #[case(r"'\n'", Ok(Lit::Char('\n')))]
+    #[case(r"'\''", Ok(Lit::Char('\'')))]
+    #[case(r"'\x41'", Ok(Lit::Char('A')))]
+    #[case(r"'\u{1F600}'", Ok(Lit::Char('😀')))]
+    #[case("b'a'", Ok(Lit::Byte(b'a')))]
+    #[case(r"b'\xFF'", Ok(Lit::Byte(0xFF)))]
+    fn char_or_byte(#[case] src: &str, #[case] expected: Result<Lit, LiteralError>) {
+        assert_eq!(lit(src), expected);
+    }
+
+    #[rstest]
+    #[case("'ﬁ'", Ok(Lit::Char('ﬁ')))]
+    #[case("'ﷺ'", Ok(Lit::Char('ﷺ')))]
+    #[case("'م'", Ok(Lit::Char('م')))]
+    #[case("'א'", Ok(Lit::Char('א')))]
+    #[case("'\u{200F}'", Ok(Lit::Char('\u{200F}')))]
+    #[case(r"'\u{202E}'", Ok(Lit::Char('\u{202E}')))]
+    fn ligature_or_rtl_char(#[case] src: &str, #[case] expected: Result<Lit, LiteralError>) {
+        assert_eq!(lit(src), expected);
+    }
+
+    #[rstest]
+    #[case("ﬁle ﬂow")]
+    #[case("مرحبا بالعالم")]
+    #[case("שלום עולם")]
+    #[case("abc مرحبا 123")]
+    #[case("a\u{200F}b\u{200E}c")]
+    #[case("\u{202E}abc\u{202C}")]
+    #[case("e\u{301}")]
+    #[case("👨\u{200D}👩\u{200D}👧")]
+    #[case("🇯🇵")]
+    fn ligature_or_rtl_string(#[case] text: &str) {
+        assert_eq!(lit(&format!("\"{text}\"")), str(text));
+    }
+
+    #[rstest]
+    #[case("ﬁle ﬂow")]
+    #[case("مرحبا بالعالم")]
+    #[case("שלום עולם")]
+    #[case("abc مرحبا 123")]
+    #[case("a\u{200F}b\u{200E}c")]
+    #[case("\u{202E}abc\u{202C}")]
+    #[case("e\u{301}")]
+    #[case("👨\u{200D}👩\u{200D}👧")]
+    #[case("🇯🇵")]
+    fn ligature_or_rtl_raw_string(#[case] text: &str) {
+        assert_eq!(lit(&format!("r\"{text}\"")), str(text));
+    }
+
+    #[rstest]
+    #[case("ﬁle ﬂow")]
+    #[case("مرحبا بالعالم")]
+    #[case("שלום עולם")]
+    #[case("abc مرحبا 123")]
+    #[case("a\u{200F}b\u{200E}c")]
+    #[case("\u{202E}abc\u{202C}")]
+    #[case("e\u{301}")]
+    #[case("👨\u{200D}👩\u{200D}👧")]
+    #[case("🇯🇵")]
+    fn ligature_or_rtl_byte_string(#[case] text: &str) {
         assert_eq!(
-            lit("18446744073709551616"),
-            Err(LiteralError::IntegerTooLarge)
+            lit(&format!("b\"{text}\"")),
+            Ok(Lit::ByteStr(text.as_bytes().to_vec()))
         );
     }
 
-    #[test]
-    fn floats() {
-        assert_eq!(lit("1_000.5"), float("1000.5", None));
-        assert_eq!(lit("2.5E-3f32"), float("2.5E-3", Some(FloatSuffix::F32)));
-        assert_eq!(lit("1f64"), float("1", Some(FloatSuffix::F64)));
+    #[rstest]
+    #[case("\"a\\\n\u{200F}\u{200E} b\"", str("ab"))]
+    #[case("\"a\\\n\u{202E}b\"", str("a\u{202E}b"))]
+    fn line_continuation_skips_directional_marks(
+        #[case] src: &str,
+        #[case] expected: Result<Lit, LiteralError>,
+    ) {
+        assert_eq!(lit(src), expected);
     }
 
-    #[test]
-    fn chars_and_bytes() {
-        assert_eq!(lit("'a'"), Ok(Lit::Char('a')));
-        assert_eq!(lit(r"'\n'"), Ok(Lit::Char('\n')));
-        assert_eq!(lit(r"'\''"), Ok(Lit::Char('\'')));
-        assert_eq!(lit(r"'\x41'"), Ok(Lit::Char('A')));
-        assert_eq!(lit(r"'\u{1F600}'"), Ok(Lit::Char('😀')));
-        assert_eq!(lit("b'a'"), Ok(Lit::Byte(b'a')));
-        assert_eq!(lit(r"b'\xFF'"), Ok(Lit::Byte(0xFF)));
-    }
-
-    #[test]
-    fn ligatures_and_rtl_chars() {
-        assert_eq!(lit("'ﬁ'"), Ok(Lit::Char('ﬁ')));
-        assert_eq!(lit("'ﷺ'"), Ok(Lit::Char('ﷺ')));
-        assert_eq!(lit("'م'"), Ok(Lit::Char('م')));
-        assert_eq!(lit("'א'"), Ok(Lit::Char('א')));
-        assert_eq!(lit("'\u{200F}'"), Ok(Lit::Char('\u{200F}')));
-        assert_eq!(lit(r"'\u{202E}'"), Ok(Lit::Char('\u{202E}')));
-    }
-
-    #[test]
-    fn ligatures_and_rtl_strings() {
-        for text in [
-            "ﬁle ﬂow",
-            "مرحبا بالعالم",
-            "שלום עולם",
-            "abc مرحبا 123",
-            "a\u{200F}b\u{200E}c",
-            "\u{202E}abc\u{202C}",
-            "e\u{301}",
-            "👨\u{200D}👩\u{200D}👧",
-            "🇯🇵",
-        ] {
-            assert_eq!(lit(&format!("\"{text}\"")), str(text), "{text:?}");
-            assert_eq!(lit(&format!("r\"{text}\"")), str(text), "{text:?}");
-            let expected = Ok(Lit::ByteStr(text.as_bytes().to_vec()));
-            assert_eq!(lit(&format!("b\"{text}\"")), expected, "{text:?}");
-        }
-    }
-
-    #[test]
-    fn line_continuation_skips_directional_marks() {
-        assert_eq!(lit("\"a\\\n\u{200F}\u{200E} b\""), str("ab"));
-        assert_eq!(lit("\"a\\\n\u{202E}b\""), str("a\u{202E}b"));
-    }
-
-    #[test]
-    fn strings() {
-        assert_eq!(lit(r#""a\tb""#), str("a\tb"));
-        assert_eq!(lit(r#""\u{3042}""#), str("あ"));
-        assert_eq!(lit(r#""\\u{41}""#), str(r"\u{41}"));
-        assert_eq!(lit("\"a\r\nb\""), str("a\nb"));
-        assert_eq!(lit("\"a\\\n    b\""), str("ab"));
-        assert_eq!(lit("\"a\\\r\n    b\""), str("ab"));
+    #[rstest]
+    #[case(r#""a\tb""#, str("a\tb"))]
+    #[case(r#""\u{3042}""#, str("あ"))]
+    #[case(r#""\\u{41}""#, str(r"\u{41}"))]
+    #[case("\"a\r\nb\"", str("a\nb"))]
+    #[case("\"a\\\n    b\"", str("ab"))]
+    #[case("\"a\\\r\n    b\"", str("ab"))]
+    fn string(#[case] src: &str, #[case] expected: Result<Lit, LiteralError>) {
+        assert_eq!(lit(src), expected);
     }
 
     #[test]
@@ -250,28 +282,30 @@ mod tests {
         assert_eq!(lit(r#"b"\xFF\u{3042}あ""#), Ok(Lit::ByteStr(expected)));
     }
 
-    #[test]
-    fn malformed_input_is_error_instead_of_panic() {
-        for (token, text, error) in [
-            (Token::Str, r#""\x80""#, LiteralError::InvalidUtf8),
-            (Token::Str, r#""\q""#, LiteralError::InvalidEscape),
-            (Token::Str, r#""\xZZ""#, LiteralError::InvalidEscape),
-            (Token::Str, r#""\u{D800}""#, LiteralError::InvalidEscape),
-            (Token::Str, r#"""#, LiteralError::Malformed),
-            (Token::Char, "''", LiteralError::Malformed),
-            (Token::Char, "'ab'", LiteralError::Malformed),
-            (Token::Byte, "b''", LiteralError::Malformed),
-            (Token::RawStr, "r#", LiteralError::Malformed),
-            (Token::Ident, "a", LiteralError::NotALiteral),
-        ] {
-            assert_eq!(decode(token, text), Err(error), "{token:?} {text}");
-        }
+    #[rstest]
+    #[case(Token::Str, r#""\x80""#, LiteralError::InvalidUtf8)]
+    #[case(Token::Str, r#""\q""#, LiteralError::InvalidEscape)]
+    #[case(Token::Str, r#""\xZZ""#, LiteralError::InvalidEscape)]
+    #[case(Token::Str, r#""\u{D800}""#, LiteralError::InvalidEscape)]
+    #[case(Token::Str, r#"""#, LiteralError::Malformed)]
+    #[case(Token::Char, "''", LiteralError::Malformed)]
+    #[case(Token::Char, "'ab'", LiteralError::Malformed)]
+    #[case(Token::Byte, "b''", LiteralError::Malformed)]
+    #[case(Token::RawStr, "r#", LiteralError::Malformed)]
+    #[case(Token::Ident, "a", LiteralError::NotALiteral)]
+    fn malformed_input_is_error_instead_of_panic(
+        #[case] token: Token,
+        #[case] text: &str,
+        #[case] error: LiteralError,
+    ) {
+        assert_eq!(decode(token, text), Err(error));
     }
 
-    #[test]
-    fn raw_strings() {
-        assert_eq!(lit(r###"r#"a\n"b"#"###), str(r#"a\n"b"#));
-        assert_eq!(lit("r\"a\r\nb\""), str("a\nb"));
-        assert_eq!(lit(r#"br"\x""#), Ok(Lit::ByteStr(br"\x".to_vec())));
+    #[rstest]
+    #[case(r###"r#"a\n"b"#"###, str(r#"a\n"b"#))]
+    #[case("r\"a\r\nb\"", str("a\nb"))]
+    #[case(r#"br"\x""#, Ok(Lit::ByteStr(br"\x".to_vec())))]
+    fn raw_string(#[case] src: &str, #[case] expected: Result<Lit, LiteralError>) {
+        assert_eq!(lit(src), expected);
     }
 }
