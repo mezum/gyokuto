@@ -1,6 +1,7 @@
-use crate::ast::{Expr, ExprKind, GenericArg, GenericArgs, Path, Span, Type, TypeKind, UnaryOp};
+use crate::ast::{Expr, GenericArg, GenericArgs, Path, Span, Type, TypeKind};
+use crate::control::block_like;
 use crate::error::Error;
-use crate::parser::{Extra, expr, input, lex, literal, path};
+use crate::parser::{Extra, expr, input, lex, path, signed_literal};
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
 use std::iter::once;
@@ -8,7 +9,8 @@ use std::iter::once;
 /// 型を解析する
 pub fn parse_type(src: &str) -> (Option<Type>, Vec<Error>) {
     let (tokens, mut errors) = lex(src);
-    let (ty, parse_errors) = ty(src, expr(src))
+    let expr = expr(src);
+    let (ty, parse_errors) = ty(src, expr.clone(), block_like(src, expr))
         .then_ignore(end())
         .parse(input(&tokens, src))
         .into_output_errors();
@@ -16,17 +18,18 @@ pub fn parse_type(src: &str) -> (Option<Type>, Vec<Error>) {
     (ty, errors)
 }
 
-/// 型を解析する。配列の長さなどの式は `expr` で解析する
+/// 型を解析する。配列の長さなどの式は `expr`、ブロック式の型引数は `block_like` で解析する
 pub(crate) fn ty<'tok, 'src: 'tok, I>(
     src: &'src str,
     expr: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
+    block_like: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
 ) -> impl Parser<'tok, I, Type, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
     recursive(|ty| {
-        let no_bounds = no_bounds(src, expr, ty.clone());
-        let bounds = type_path(src, ty, no_bounds.clone())
+        let no_bounds = no_bounds(src, expr, block_like.clone(), ty.clone());
+        let bounds = type_path(src, ty, no_bounds.clone(), block_like)
             .separated_by(just(Token::Plus))
             .at_least(1)
             .collect::<Vec<_>>();
@@ -48,17 +51,24 @@ where
 pub(crate) fn ty_no_bounds<'tok, 'src: 'tok, I>(
     src: &'src str,
     expr: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
+    block_like: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
 ) -> impl Parser<'tok, I, Type, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
-    no_bounds(src, expr.clone(), ty(src, expr))
+    no_bounds(
+        src,
+        expr.clone(),
+        block_like.clone(),
+        ty(src, expr, block_like),
+    )
 }
 
 /// TypeNoBounds を解析する。内側の型は `ty` で解析する
 fn no_bounds<'tok, 'src: 'tok, I>(
     src: &'src str,
     expr: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
+    block_like: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
     ty: impl Parser<'tok, I, Type, Extra> + Clone + 'tok,
 ) -> impl Parser<'tok, I, Type, Extra> + Clone
 where
@@ -98,7 +108,7 @@ where
         span,
     };
     recursive(|no_bounds| {
-        let type_path = type_path(src, ty.clone(), no_bounds.clone());
+        let type_path = type_path(src, ty.clone(), no_bounds.clone(), block_like.clone());
         let reference = just(Token::Amp)
             .ignore_then(just(Token::Mut).or_not())
             .then(no_bounds.clone())
@@ -149,16 +159,18 @@ where
     })
 }
 
-/// 型のパスを解析する。型引数の型は `ty`、`Fn() -> R` の戻り値の型は `no_bounds` で解析する
+/// 型のパスを解析する。型引数の型は `ty`、`Fn() -> R` の戻り値の型は `no_bounds`、
+/// ブロック式の型引数は `block_like` で解析する
 fn type_path<'tok, 'src: 'tok, I>(
     src: &'src str,
     ty: impl Parser<'tok, I, Type, Extra> + Clone + 'tok,
     no_bounds: impl Parser<'tok, I, Type, Extra> + Clone + 'tok,
+    block_like: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
 ) -> impl Parser<'tok, I, Path, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
-    let args = angle_args(src, ty.clone())
+    let args = angle_args(src, ty.clone(), block_like)
         .or(signature(ty, no_bounds).map(|(inputs, output)| GenericArgs::Paren { inputs, output }));
     path(src, args.or_not())
 }
@@ -189,23 +201,12 @@ where
 pub(crate) fn angle_args<'tok, 'src: 'tok, I>(
     src: &'src str,
     ty: impl Parser<'tok, I, Type, Extra> + Clone,
+    block_like: impl Parser<'tok, I, Expr, Extra> + Clone,
 ) -> impl Parser<'tok, I, GenericArgs, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
-    let lit = literal(src).map_with(|kind, e| Expr {
-        kind,
-        span: e.span(),
-    });
-    let neg_lit = just(Token::Minus)
-        .ignore_then(lit.clone())
-        .map_with(|lit, e| Expr {
-            kind: ExprKind::Unary {
-                op: UnaryOp::Neg,
-                expr: Box::new(lit),
-            },
-            span: e.span(),
-        });
+    let block = just(Token::LBrace).rewind().ignore_then(block_like);
     let binding = just(Token::Ident)
         .to_span()
         .then_ignore(just(Token::Eq))
@@ -216,7 +217,8 @@ where
         });
     let arg = choice((
         binding,
-        lit.or(neg_lit).map(GenericArg::Const),
+        signed_literal(src).or(block.clone()).map(GenericArg::Const),
+        just(Token::Dyn).ignore_then(block).map(GenericArg::Dyn),
         ty.map(GenericArg::Type),
     ));
     just(Token::Lt)
@@ -377,5 +379,40 @@ mod tests {
         let (ty, errors) = parse_type("(A, [B C])");
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert_eq!(ty.unwrap().as_sexpr(), "(tuple A error)");
+    }
+
+    #[rstest]
+    #[case("Buffer<{ N * M }>", "Buffer<(block (Mul N M))>")]
+    #[case("Buffer<{ N }, T>", "Buffer<(block N), T>")]
+    #[case("Vec<Buffer<{ N }>>", "Vec<Buffer<(block N)>>")]
+    #[case("Buffer<{ let n = N; n }>", "Buffer<(block (let n (= N)) n)>")]
+    fn block_const_arg(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("dyn Store<dyn { t }>", "(dyn Store<(dyn (block t))>)")]
+    #[case("dyn Store<dyn { t }, T>", "(dyn Store<(dyn (block t)), T>)")]
+    #[case("dyn Store<dyn A>", "(dyn Store<(dyn A)>)")]
+    fn runtime_arg(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[test]
+    fn block_const_arg_in_turbofish() {
+        let (expr, errors) = crate::parse_expr("f::<{ N }>()");
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(expr.unwrap().as_sexpr(), "(call f<(block N)>)");
+    }
+
+    #[rstest]
+    #[case("Buffer<{ N } + M>")]
+    #[case("Buffer<{ N }.m>")]
+    #[case("Buffer<{ N } > M>")]
+    #[case("Store<dyn { t } + A>")]
+    #[case("Store<dyn ({ t })>")]
+    #[case("Buffer<{ N }")]
+    fn invalid_block_arg(#[case] src: &str) {
+        assert!(!parse_type(src).1.is_empty());
     }
 }

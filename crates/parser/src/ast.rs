@@ -127,6 +127,39 @@ pub enum Field {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Pat {
+    pub kind: PatKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PatKind {
+    /// `_`
+    Wild,
+    /// `..`
+    Rest,
+    /// `mut? name` / `mut? name in sub`
+    Ident {
+        mutable: bool,
+        name: String,
+        sub: Option<Box<Pat>>,
+    },
+    /// リテラルか、`-` を前置したリテラル
+    Lit(Expr),
+    /// 端点はリテラルかパス
+    Range {
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+        inclusive: bool,
+    },
+    Paren(Box<Pat>),
+    Tuple(Vec<Pat>),
+    Path(Path),
+    /// `a | b`
+    Or(Vec<Pat>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Type {
     pub kind: TypeKind,
     pub span: Span,
@@ -185,6 +218,8 @@ pub enum GenericArg {
     },
     /// const generics の定数
     Const(Expr),
+    /// `dyn { .. }`。`dyn` のトレイトの、実行時に決まる型引数
+    Dyn(Expr),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

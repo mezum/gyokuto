@@ -1,19 +1,19 @@
 use crate::ast::{Expr, ExprKind, Span};
-use crate::parser::Extra;
+use crate::parser::{Extra, expr_with};
 use crate::stmt::block;
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
 
-/// ブロック様の式を解析する。条件式には `cond` を使う
+/// ブロック様の式を解析する。内側の式は `expr` で解析する
 pub(crate) fn block_like<'tok, 'src: 'tok, I>(
     src: &'src str,
     expr: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
-    cond: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
 ) -> impl Parser<'tok, I, Expr, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
     recursive(move |block_like| {
+        let cond = expr_with(src, expr.clone(), block_like.clone(), false);
         let block = block(src, expr, block_like);
         let block_expr = block.clone().map_with(|block, e| Expr {
             kind: ExprKind::Block(block),
@@ -125,6 +125,7 @@ mod tests {
     #[case("if a[{ b }] { c }", "(if (index a (block b)) (block c))")]
     #[case("if f({ a }) { b }", "(if (call f (block a)) (block b))")]
     #[case("if (if a { b }) { c }", "(if (paren (if a (block b))) (block c))")]
+    #[case("if a as B<{ N }> { c }", "(if (as a B<(block N)>) (block c))")]
     fn if_expr(#[case] src: &str, #[case] expected: &str) {
         assert_eq!(parse_ok(src), expected);
     }

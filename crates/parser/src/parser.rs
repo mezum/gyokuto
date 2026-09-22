@@ -74,26 +74,27 @@ pub(crate) fn expr<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, 
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
-    recursive(|expr| {
-        let cond = expr_with(src, expr.clone(), None);
-        let block_like = block_like(src, expr.clone(), cond).boxed();
-        expr_with(src, expr, Some(block_like))
-    })
+    recursive(|expr| expr_with(src, expr.clone(), block_like(src, expr), true))
 }
 
-/// 式を解析する。括弧の内側の式には `expr` を使う
+/// 式を解析する。括弧の内側の式には `expr`、ブロック様の式には `block_like` を使う
 ///
-/// `block_like` が無い場合は、括弧の外にブロック様の式を含まない条件式を解析する
-fn expr_with<'tok, 'src: 'tok, I>(
+/// `allow_block_like` が偽の場合は、括弧の外にブロック様の式を含まない条件式を解析する
+pub(crate) fn expr_with<'tok, 'src: 'tok, I>(
     src: &'src str,
     expr: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
-    block_like: Option<Boxed<'tok, 'tok, I, Expr, Extra>>,
+    block_like: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
+    allow_block_like: bool,
 ) -> impl Parser<'tok, I, Expr, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
     recursive(move |this| {
-        let turbofish = just(Token::ColonColon).ignore_then(angle_args(src, ty(src, expr.clone())));
+        let turbofish = just(Token::ColonColon).ignore_then(angle_args(
+            src,
+            ty(src, expr.clone(), block_like.clone()),
+            block_like.clone(),
+        ));
         let rest_items = just(Token::Comma).ignore_then(
             expr.clone()
                 .separated_by(just(Token::Comma))
@@ -153,8 +154,8 @@ where
             kind,
             span: e.span(),
         });
-        let atom = match block_like {
-            Some(block_like) => choice((atom, block_like))
+        let atom = match allow_block_like {
+            true => choice((atom, block_like.clone()))
                 .recover_with(via_parser(nested_delimiters(
                     Token::LBrace,
                     Token::RBrace,
@@ -165,7 +166,7 @@ where
                     error,
                 )))
                 .boxed(),
-            None => atom.boxed(),
+            false => atom.boxed(),
         }
         .recover_with(via_parser(nested_delimiters(
             Token::LParen,
@@ -267,7 +268,7 @@ where
         );
         let cast = postfix(
             11,
-            just(Token::As).ignore_then(ty_no_bounds(src, expr.clone())),
+            just(Token::As).ignore_then(ty_no_bounds(src, expr.clone(), block_like.clone())),
             |expr, ty, e| Expr {
                 kind: ExprKind::Cast {
                     expr: Box::new(expr),
@@ -503,6 +504,29 @@ where
             })
     });
     choice((bool_lit, lit))
+}
+
+/// リテラルか、`-` を前置したリテラルを解析する
+pub(crate) fn signed_literal<'tok, 'src: 'tok, I>(
+    src: &'src str,
+) -> impl Parser<'tok, I, Expr, Extra> + Clone
+where
+    I: ValueInput<'tok, Token = Token, Span = Span>,
+{
+    let lit = literal(src).map_with(|kind, e| Expr {
+        kind,
+        span: e.span(),
+    });
+    let neg_lit = just(Token::Minus)
+        .ignore_then(lit.clone())
+        .map_with(|lit, e| Expr {
+            kind: ExprKind::Unary {
+                op: UnaryOp::Neg,
+                expr: Box::new(lit),
+            },
+            span: e.span(),
+        });
+    lit.or(neg_lit)
 }
 
 /// パスを解析する。各セグメントの後には型引数として `args` を続けて解析する
