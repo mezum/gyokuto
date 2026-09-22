@@ -354,6 +354,7 @@ fn block_comment(lex: &mut Lexer<Token>) -> Result<(), LexError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
     use std::ops::Range;
 
     fn lex(src: &str) -> Vec<(Result<Token, LexError>, Range<usize>)> {
@@ -368,11 +369,16 @@ mod tests {
         );
     }
 
-    #[test]
-    fn identifiers() {
-        for src in ["a", "a1", "_x", "__", "変数", "letter", "Selfie"] {
-            assert_eq!(lex(src), [(Ok(Token::Ident), 0..src.len())], "{src}");
-        }
+    #[rstest]
+    #[case("a")]
+    #[case("a1")]
+    #[case("_x")]
+    #[case("__")]
+    #[case("変数")]
+    #[case("letter")]
+    #[case("Selfie")]
+    fn identifier(#[case] src: &str) {
+        assert_eq!(lex(src), [(Ok(Token::Ident), 0..src.len())]);
     }
 
     #[test]
@@ -380,46 +386,42 @@ mod tests {
         assert_eq!(lex("_"), [(Ok(Token::Underscore), 0..1)]);
     }
 
-    #[test]
-    fn keywords() {
-        let table = [
-            ("as", Token::As),
-            ("break", Token::Break),
-            ("comptime", Token::Comptime),
-            ("const", Token::Const),
-            ("continue", Token::Continue),
-            ("crate", Token::Crate),
-            ("dyn", Token::Dyn),
-            ("else", Token::Else),
-            ("enum", Token::Enum),
-            ("false", Token::False),
-            ("fn", Token::Fn),
-            ("for", Token::For),
-            ("if", Token::If),
-            ("impl", Token::Impl),
-            ("in", Token::In),
-            ("let", Token::Let),
-            ("loop", Token::Loop),
-            ("match", Token::Match),
-            ("move", Token::Move),
-            ("mut", Token::Mut),
-            ("pub", Token::Pub),
-            ("return", Token::Return),
-            ("self", Token::SelfValue),
-            ("Self", Token::SelfType),
-            ("struct", Token::Struct),
-            ("super", Token::Super),
-            ("trait", Token::Trait),
-            ("true", Token::True),
-            ("type", Token::Type),
-            ("use", Token::Use),
-            ("where", Token::Where),
-            ("while", Token::While),
-            ("yield", Token::Yield),
-        ];
-        for (src, token) in table {
-            assert_eq!(lex(src), [(Ok(token), 0..src.len())], "{src}");
-        }
+    #[rstest]
+    #[case("as", Token::As)]
+    #[case("break", Token::Break)]
+    #[case("comptime", Token::Comptime)]
+    #[case("const", Token::Const)]
+    #[case("continue", Token::Continue)]
+    #[case("crate", Token::Crate)]
+    #[case("dyn", Token::Dyn)]
+    #[case("else", Token::Else)]
+    #[case("enum", Token::Enum)]
+    #[case("false", Token::False)]
+    #[case("fn", Token::Fn)]
+    #[case("for", Token::For)]
+    #[case("if", Token::If)]
+    #[case("impl", Token::Impl)]
+    #[case("in", Token::In)]
+    #[case("let", Token::Let)]
+    #[case("loop", Token::Loop)]
+    #[case("match", Token::Match)]
+    #[case("move", Token::Move)]
+    #[case("mut", Token::Mut)]
+    #[case("pub", Token::Pub)]
+    #[case("return", Token::Return)]
+    #[case("self", Token::SelfValue)]
+    #[case("Self", Token::SelfType)]
+    #[case("struct", Token::Struct)]
+    #[case("super", Token::Super)]
+    #[case("trait", Token::Trait)]
+    #[case("true", Token::True)]
+    #[case("type", Token::Type)]
+    #[case("use", Token::Use)]
+    #[case("where", Token::Where)]
+    #[case("while", Token::While)]
+    #[case("yield", Token::Yield)]
+    fn keyword(#[case] src: &str, #[case] token: Token) {
+        assert_eq!(lex(src), [(Ok(token), 0..src.len())]);
     }
 
     #[test]
@@ -446,91 +448,76 @@ mod tests {
         );
     }
 
-    #[test]
-    fn punctuation() {
-        let table = [
-            ("+", Token::Plus),
-            ("-", Token::Minus),
-            ("*", Token::Star),
-            ("/", Token::Slash),
-            ("%", Token::Percent),
-            ("&", Token::Amp),
-            ("|", Token::Pipe),
-            ("^", Token::Caret),
-            ("!", Token::Bang),
-            ("<<", Token::Shl),
-            (">>", Token::Shr),
-            ("&&", Token::AndAnd),
-            ("||", Token::OrOr),
-            ("==", Token::EqEq),
-            ("!=", Token::Ne),
-            ("<", Token::Lt),
-            (">", Token::Gt),
-            ("<=", Token::Le),
-            (">=", Token::Ge),
-            ("=", Token::Eq),
-            ("+=", Token::PlusEq),
-            ("-=", Token::MinusEq),
-            ("*=", Token::StarEq),
-            ("/=", Token::SlashEq),
-            ("%=", Token::PercentEq),
-            ("&=", Token::AmpEq),
-            ("|=", Token::PipeEq),
-            ("^=", Token::CaretEq),
-            ("<<=", Token::ShlEq),
-            (">>=", Token::ShrEq),
-            (".", Token::Dot),
-            ("..", Token::DotDot),
-            ("..=", Token::DotDotEq),
-            ("::", Token::ColonColon),
-            (":", Token::Colon),
-            (";", Token::Semi),
-            (",", Token::Comma),
-            ("->", Token::Arrow),
-            ("=>", Token::FatArrow),
-            ("?", Token::Question),
-            ("#", Token::Pound),
-            ("(", Token::LParen),
-            (")", Token::RParen),
-            ("[", Token::LBracket),
-            ("]", Token::RBracket),
-            ("{", Token::LBrace),
-            ("}", Token::RBrace),
-        ];
-        for (src, token) in table {
-            assert_eq!(lex(src), [(Ok(token), 0..src.len())], "{src}");
-        }
+    #[rstest]
+    #[case("+", Token::Plus)]
+    #[case("-", Token::Minus)]
+    #[case("*", Token::Star)]
+    #[case("/", Token::Slash)]
+    #[case("%", Token::Percent)]
+    #[case("&", Token::Amp)]
+    #[case("|", Token::Pipe)]
+    #[case("^", Token::Caret)]
+    #[case("!", Token::Bang)]
+    #[case("<<", Token::Shl)]
+    #[case(">>", Token::Shr)]
+    #[case("&&", Token::AndAnd)]
+    #[case("||", Token::OrOr)]
+    #[case("==", Token::EqEq)]
+    #[case("!=", Token::Ne)]
+    #[case("<", Token::Lt)]
+    #[case(">", Token::Gt)]
+    #[case("<=", Token::Le)]
+    #[case(">=", Token::Ge)]
+    #[case("=", Token::Eq)]
+    #[case("+=", Token::PlusEq)]
+    #[case("-=", Token::MinusEq)]
+    #[case("*=", Token::StarEq)]
+    #[case("/=", Token::SlashEq)]
+    #[case("%=", Token::PercentEq)]
+    #[case("&=", Token::AmpEq)]
+    #[case("|=", Token::PipeEq)]
+    #[case("^=", Token::CaretEq)]
+    #[case("<<=", Token::ShlEq)]
+    #[case(">>=", Token::ShrEq)]
+    #[case(".", Token::Dot)]
+    #[case("..", Token::DotDot)]
+    #[case("..=", Token::DotDotEq)]
+    #[case("::", Token::ColonColon)]
+    #[case(":", Token::Colon)]
+    #[case(";", Token::Semi)]
+    #[case(",", Token::Comma)]
+    #[case("->", Token::Arrow)]
+    #[case("=>", Token::FatArrow)]
+    #[case("?", Token::Question)]
+    #[case("#", Token::Pound)]
+    #[case("(", Token::LParen)]
+    #[case(")", Token::RParen)]
+    #[case("[", Token::LBracket)]
+    #[case("]", Token::RBracket)]
+    #[case("{", Token::LBrace)]
+    #[case("}", Token::RBrace)]
+    fn punctuation(#[case] src: &str, #[case] token: Token) {
+        assert_eq!(lex(src), [(Ok(token), 0..src.len())]);
     }
 
-    #[test]
-    fn longest_match() {
-        assert_eq!(
-            lex("a<<=b"),
-            [
-                (Ok(Token::Ident), 0..1),
-                (Ok(Token::ShlEq), 1..4),
-                (Ok(Token::Ident), 4..5)
-            ]
-        );
-        assert_eq!(
-            lex("T>>"),
-            [(Ok(Token::Ident), 0..1), (Ok(Token::Shr), 1..3)]
-        );
-        assert_eq!(
-            lex("..."),
-            [(Ok(Token::DotDot), 0..2), (Ok(Token::Dot), 2..3)]
-        );
-        assert_eq!(
-            lex("#!"),
-            [(Ok(Token::Pound), 0..1), (Ok(Token::Bang), 1..2)]
-        );
+    #[rstest]
+    #[case::shl_eq("a<<=b", &[(Ok(Token::Ident), 0..1), (Ok(Token::ShlEq), 1..4), (Ok(Token::Ident), 4..5)])]
+    #[case::shr("T>>", &[(Ok(Token::Ident), 0..1), (Ok(Token::Shr), 1..3)])]
+    #[case::dot_dot("...", &[(Ok(Token::DotDot), 0..2), (Ok(Token::Dot), 2..3)])]
+    #[case::pound("#!", &[(Ok(Token::Pound), 0..1), (Ok(Token::Bang), 1..2)])]
+    fn longest_match(
+        #[case] src: &str,
+        #[case] expected: &[(Result<Token, LexError>, Range<usize>)],
+    ) {
+        assert_eq!(lex(src), expected);
     }
 
-    #[test]
-    fn unsupported_symbols_are_errors() {
-        for src in ["@", "$", "~"] {
-            assert_eq!(lex(src), [(Err(LexError::UnexpectedChar), 0..1)], "{src}");
-        }
+    #[rstest]
+    #[case("@")]
+    #[case("$")]
+    #[case("~")]
+    fn unsupported_symbol_is_error(#[case] src: &str) {
+        assert_eq!(lex(src), [(Err(LexError::UnexpectedChar), 0..1)]);
     }
 
     #[test]
