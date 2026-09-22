@@ -80,6 +80,10 @@ mod tests {
     use super::*;
 
     fn show(expr: &Expr) -> String {
+        let list = |name: &str, exprs: &[&Expr]| {
+            let items: String = exprs.iter().map(|e| format!(" {}", show(e))).collect();
+            format!("({name}{items})")
+        };
         match &expr.kind {
             ExprKind::Lit(Lit::Bool(b)) => b.to_string(),
             ExprKind::Path(path) => path
@@ -94,6 +98,10 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
                 .join("::"),
+            ExprKind::Paren(e) => list("paren", &[e]),
+            ExprKind::Tuple(es) => list("tuple", &es.iter().collect::<Vec<_>>()),
+            ExprKind::Array(es) => list("array", &es.iter().collect::<Vec<_>>()),
+            ExprKind::Repeat { elem, len } => list("repeat", &[elem, len]),
             ExprKind::Error => "error".to_string(),
         }
     }
@@ -152,6 +160,65 @@ mod tests {
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert_eq!(errors[0].span().into_range(), 0..1);
         assert_eq!(show(&expr.unwrap()), "error");
+    }
+
+    #[test]
+    fn parens_and_tuples() {
+        assert_eq!(parse_ok("(a)"), "(paren a)");
+        assert_eq!(parse_ok("()"), "(tuple)");
+        assert_eq!(parse_ok("(a,)"), "(tuple a)");
+        assert_eq!(parse_ok("(a, b)"), "(tuple a b)");
+        assert_eq!(parse_ok("(a, b,)"), "(tuple a b)");
+        assert_eq!(parse_ok("((a))"), "(paren (paren a))");
+    }
+
+    #[test]
+    fn arrays() {
+        assert_eq!(parse_ok("[]"), "(array)");
+        assert_eq!(parse_ok("[a, b,]"), "(array a b)");
+        assert_eq!(parse_ok("[a; n]"), "(repeat a n)");
+        assert_eq!(parse_ok("[(a, b), [c]]"), "(array (tuple a b) (array c))");
+    }
+
+    #[test]
+    fn invalid_separators() {
+        for src in ["(a,,)", "(,)", "[a,,]", "[,]", "[a; n,]", "[a, b; n]"] {
+            assert!(!parse_expr(src).1.is_empty(), "{src}");
+        }
+    }
+
+    #[test]
+    fn deeply_nested_delimiters() {
+        let depth = 64;
+        let parens = format!("{}a{}", "(".repeat(depth), ")".repeat(depth));
+        let arrays = format!("{}a{}", "[".repeat(depth), "]".repeat(depth));
+        assert!(parse_expr(&parens).1.is_empty());
+        assert!(parse_expr(&arrays).1.is_empty());
+    }
+
+    #[test]
+    fn nested_spans() {
+        let (expr, _) = parse_expr("( a )");
+        let expr = expr.unwrap();
+        assert_eq!(expr.span.into_range(), 0..5);
+        let ExprKind::Paren(inner) = expr.kind else {
+            panic!("{expr:?}");
+        };
+        assert_eq!(inner.span.into_range(), 2..3);
+    }
+
+    #[test]
+    fn recovers_inside_delimiters() {
+        let (expr, errors) = parse_expr("[(a b), c]");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(show(&expr.unwrap()), "(array error c)");
+    }
+
+    #[test]
+    fn lexical_error_inside_delimiters() {
+        let (expr, errors) = parse_expr("[a, $]");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(show(&expr.unwrap()), "(array a error)");
     }
 
     #[test]

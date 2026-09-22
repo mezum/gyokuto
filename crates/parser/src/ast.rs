@@ -12,6 +12,14 @@ pub struct Expr {
 pub enum ExprKind {
     Lit(Lit),
     Path(Path),
+    Paren(Box<Expr>),
+    Tuple(Vec<Expr>),
+    Array(Vec<Expr>),
+    /// `[elem; len]`
+    Repeat {
+        elem: Box<Expr>,
+        len: Box<Expr>,
+    },
     /// 構文エラーから回復した箇所
     Error,
 }
