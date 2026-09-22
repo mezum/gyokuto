@@ -17,10 +17,13 @@ const INT_SUFFIXES: [(&str, IntSuffix); 10] = [
 const FLOAT_SUFFIXES: [(&str, FloatSuffix); 2] =
     [("f32", FloatSuffix::F32), ("f64", FloatSuffix::F64)];
 
-/// 字句解析で検証済みのリテラルのトークンを値に変換する
+/// リテラルのトークンを値に変換する。不正な内容は panic せずエラーとする
 pub(crate) fn decode(token: Token, text: &str) -> Result<Lit, &'static str> {
-    let quoted = |prefix: usize| &text[prefix + 1..text.len() - 1];
-    let utf8 = |bytes| String::from_utf8(bytes).expect("文字・文字列リテラルは UTF-8 になる");
+    let quoted = |prefix: usize| {
+        text.get(prefix + 1..text.len().saturating_sub(1))
+            .ok_or(MALFORMED)
+    };
+    let utf8 = |bytes| String::from_utf8(bytes).map_err(|_| "literal is not valid UTF-8");
     Ok(match token {
         Token::Int => decode_int(text)?,
         Token::Float => {
@@ -30,15 +33,26 @@ pub(crate) fn decode(token: Token, text: &str) -> Result<Lit, &'static str> {
                 suffix,
             }
         }
-        Token::Char => Lit::Char(utf8(unescape(quoted(0))).chars().next().unwrap()),
-        Token::Byte => Lit::Byte(unescape(quoted(1))[0]),
-        Token::Str => Lit::Str(utf8(unescape(quoted(0)))),
-        Token::ByteStr => Lit::ByteStr(unescape(quoted(1))),
-        Token::RawStr => Lit::Str(raw_body(&text[1..])),
-        Token::RawByteStr => Lit::ByteStr(raw_body(&text[2..]).into_bytes()),
-        _ => unreachable!("リテラルではないトークン: {token:?}"),
+        Token::Char => {
+            let chars: Vec<char> = utf8(unescape(quoted(0)?)?)?.chars().collect();
+            match chars[..] {
+                [c] => Lit::Char(c),
+                _ => return Err(MALFORMED),
+            }
+        }
+        Token::Byte => match unescape(quoted(1)?)?[..] {
+            [b] => Lit::Byte(b),
+            _ => return Err(MALFORMED),
+        },
+        Token::Str => Lit::Str(utf8(unescape(quoted(0)?)?)?),
+        Token::ByteStr => Lit::ByteStr(unescape(quoted(1)?)?),
+        Token::RawStr => Lit::Str(raw_body(text.get(1..).ok_or(MALFORMED)?)?),
+        Token::RawByteStr => Lit::ByteStr(raw_body(text.get(2..).ok_or(MALFORMED)?)?.into_bytes()),
+        _ => return Err("not a literal token"),
     })
 }
+
+const MALFORMED: &str = "malformed literal";
 
 fn decode_int(text: &str) -> Result<Lit, &'static str> {
     let (digits, suffix) = split_suffix(text, &INT_SUFFIXES);
@@ -59,13 +73,17 @@ fn split_suffix<'a, S: Copy>(text: &'a str, suffixes: &[(&str, S)]) -> (&'a str,
 }
 
 /// `r` / `br` の後の `#...#"` と `"#...#` を除き、CRLF を正規化した中身を得る
-fn raw_body(text: &str) -> String {
+fn raw_body(text: &str) -> Result<String, &'static str> {
     let hashes = text.len() - text.trim_start_matches('#').len();
-    text[hashes + 1..text.len() - hashes - 1].replace("\r\n", "\n")
+    let body = text
+        .get(hashes + 1..text.len().saturating_sub(hashes + 1))
+        .ok_or(MALFORMED)?;
+    Ok(body.replace("\r\n", "\n"))
 }
 
 /// エスケープ・行継続・CRLF を処理したバイト列を得る
-fn unescape(body: &str) -> Vec<u8> {
+fn unescape(body: &str) -> Result<Vec<u8>, &'static str> {
+    const INVALID_ESCAPE: &str = "invalid escape sequence";
     let body = body.replace("\r\n", "\n");
     let mut bytes = Vec::new();
     let mut chars = body.chars();
@@ -82,7 +100,7 @@ fn unescape(body: &str) -> Vec<u8> {
             Some(c @ ('\\' | '\'' | '"')) => bytes.push(c as u8),
             Some('x') => {
                 let hex: String = chars.by_ref().take(2).collect();
-                bytes.push(u8::from_str_radix(&hex, 16).unwrap());
+                bytes.push(u8::from_str_radix(&hex, 16).map_err(|_| INVALID_ESCAPE)?);
             }
             Some('u') => {
                 let hex: String = chars
@@ -90,8 +108,11 @@ fn unescape(body: &str) -> Vec<u8> {
                     .take_while(|&c| c != '}')
                     .filter(|&c| c != '{' && c != '_')
                     .collect();
-                let value = u32::from_str_radix(&hex, 16).unwrap();
-                push_char(&mut bytes, char::from_u32(value).unwrap());
+                let c = u32::from_str_radix(&hex, 16)
+                    .ok()
+                    .and_then(char::from_u32)
+                    .ok_or(INVALID_ESCAPE)?;
+                push_char(&mut bytes, c);
             }
             Some('\n') => {
                 chars = chars
@@ -99,10 +120,10 @@ fn unescape(body: &str) -> Vec<u8> {
                     .trim_start_matches(is_pattern_white_space)
                     .chars()
             }
-            other => unreachable!("字句解析で検証済みのエスケープ: {other:?}"),
+            _ => return Err(INVALID_ESCAPE),
         }
     }
-    bytes
+    Ok(bytes)
 }
 
 fn push_char(bytes: &mut Vec<u8>, c: char) {
@@ -188,6 +209,24 @@ mod tests {
     fn byte_strings() {
         let expected = [&[0xFF][..], "ああ".as_bytes()].concat();
         assert_eq!(lit(r#"b"\xFF\u{3042}あ""#), Ok(Lit::ByteStr(expected)));
+    }
+
+    #[test]
+    fn malformed_input_is_error_instead_of_panic() {
+        for (token, text) in [
+            (Token::Str, r#""\x80""#),
+            (Token::Str, r#""\q""#),
+            (Token::Str, r#""\xZZ""#),
+            (Token::Str, r#""\u{D800}""#),
+            (Token::Str, r#"""#),
+            (Token::Char, "''"),
+            (Token::Char, "'ab'"),
+            (Token::Byte, "b''"),
+            (Token::RawStr, "r#"),
+            (Token::Ident, "a"),
+        ] {
+            assert!(decode(token, text).is_err(), "{token:?} {text}");
+        }
     }
 
     #[test]
