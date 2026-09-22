@@ -1,4 +1,5 @@
 use crate::error::LexError;
+use crate::quoted::{Quoted, invalid_quoted};
 use logos::{Lexer, Logos};
 
 /// エラー用パターンの callback の戻り値の型
@@ -41,7 +42,7 @@ pub enum Token {
     /// 閉じていない・不正な内容・直後に識別子の文字が続く文字リテラルはエラーとする
     #[regex(
         r"'([^\\\n]|\\.)?([^'\\\n]|\\.)*'?\p{XID_Continue}*",
-        |_| Fail::Err(LexError::InvalidCharLiteral),
+        |lex| Fail::Err(invalid_quoted(lex.slice(), Quoted::Char)),
         priority = 0
     )]
     Char,
@@ -49,7 +50,7 @@ pub enum Token {
     /// 閉じていない・不正な内容・直後に識別子の文字が続く文字列リテラルはエラーとする
     #[regex(
         r#""([^"\\]|\\(.|\n))*("\p{XID_Continue}*)?"#,
-        |_| Fail::Err(LexError::InvalidStringLiteral),
+        |lex| Fail::Err(invalid_quoted(lex.slice(), Quoted::Str)),
         priority = 0
     )]
     Str,
@@ -57,7 +58,7 @@ pub enum Token {
     /// 閉じていない・不正な内容・直後に識別子の文字が続くバイト文字リテラルはエラーとする
     #[regex(
         r"b'([^\\\n]|\\.)?([^'\\\n]|\\.)*'?\p{XID_Continue}*",
-        |_| Fail::Err(LexError::InvalidByteLiteral),
+        |lex| Fail::Err(invalid_quoted(lex.slice(), Quoted::Byte)),
         priority = 0
     )]
     Byte,
@@ -68,7 +69,7 @@ pub enum Token {
     /// 閉じていない・不正な内容・直後に識別子の文字が続くバイト文字列リテラルはエラーとする
     #[regex(
         r#"b"([^"\\]|\\(.|\n))*("\p{XID_Continue}*)?"#,
-        |_| Fail::Err(LexError::InvalidByteStringLiteral),
+        |lex| Fail::Err(invalid_quoted(lex.slice(), Quoted::ByteStr)),
         priority = 0
     )]
     ByteStr,
@@ -641,18 +642,18 @@ mod tests {
     #[test]
     fn invalid_char_literals() {
         for (src, error) in [
-            ("''", LexError::InvalidCharLiteral),
-            ("'ab'", LexError::InvalidCharLiteral),
-            ("'a", LexError::InvalidCharLiteral),
-            ("'''", LexError::InvalidCharLiteral),
-            ("'\t'", LexError::InvalidCharLiteral),
-            (r"'\q'", LexError::InvalidCharLiteral),
-            (r"'\x80'", LexError::InvalidCharLiteral),
+            ("''", LexError::EmptyCharLiteral),
+            ("'ab'", LexError::TooManyCharsInCharLiteral),
+            ("'a", LexError::UnterminatedCharLiteral),
+            ("'''", LexError::UnescapedCharInCharLiteral),
+            ("'\t'", LexError::UnescapedCharInCharLiteral),
+            (r"'\q'", LexError::InvalidEscape),
+            (r"'\x80'", LexError::InvalidEscape),
             (r"'\u{110000}'", LexError::InvalidUnicodeEscape),
             (r"'\u{D800}'", LexError::InvalidUnicodeEscape),
-            (r"'\u{}'", LexError::InvalidCharLiteral),
-            (r"'\u{1234567}'", LexError::InvalidCharLiteral),
-            ("'a'x", LexError::InvalidCharLiteral),
+            (r"'\u{}'", LexError::InvalidUnicodeEscape),
+            (r"'\u{1234567}'", LexError::InvalidUnicodeEscape),
+            ("'a'x", LexError::ReservedLiteralSuffix),
         ] {
             assert_eq!(lex(src), [(Err(error), 0..src.len())], "{src}");
         }
@@ -679,11 +680,11 @@ mod tests {
     #[test]
     fn invalid_string_literals() {
         for (src, error) in [
-            (r#""abc"#, LexError::InvalidStringLiteral),
-            (r#""a\qb""#, LexError::InvalidStringLiteral),
-            ("\"a\rb\"", LexError::InvalidStringLiteral),
+            (r#""abc"#, LexError::UnterminatedStringLiteral),
+            (r#""a\qb""#, LexError::InvalidEscape),
+            ("\"a\rb\"", LexError::BareCarriageReturn),
             (r#""\u{D800}""#, LexError::InvalidUnicodeEscape),
-            (r#""abc"x"#, LexError::InvalidStringLiteral),
+            (r#""abc"x"#, LexError::ReservedLiteralSuffix),
         ] {
             assert_eq!(lex(src), [(Err(error), 0..src.len())], "{src:?}");
         }
@@ -694,7 +695,7 @@ mod tests {
         assert_eq!(
             lex(r#""a\qb" x"#),
             [
-                (Err(LexError::InvalidStringLiteral), 0..6),
+                (Err(LexError::InvalidEscape), 0..6),
                 (Ok(Token::Ident), 7..8)
             ]
         );
@@ -711,16 +712,15 @@ mod tests {
 
     #[test]
     fn invalid_byte_literals() {
-        for src in [
-            "b'あ'",
-            r"b'\u{41}'",
-            "b''",
-            "b'ab'",
-            "b'a",
-            "b'a'x",
-            r"b'\x1'",
+        for (src, error) in [
+            ("b'あ'", LexError::NonAsciiInByteLiteral),
+            (r"b'\u{41}'", LexError::UnicodeEscapeInByteLiteral),
+            ("b''", LexError::EmptyCharLiteral),
+            ("b'ab'", LexError::TooManyCharsInCharLiteral),
+            ("b'a", LexError::UnterminatedCharLiteral),
+            ("b'a'x", LexError::ReservedLiteralSuffix),
+            (r"b'\x1'", LexError::InvalidEscape),
         ] {
-            let error = LexError::InvalidByteLiteral;
             assert_eq!(lex(src), [(Err(error), 0..src.len())], "{src}");
         }
     }
@@ -743,11 +743,11 @@ mod tests {
     #[test]
     fn invalid_byte_string_literals() {
         for (src, error) in [
-            (r#"b"abc"#, LexError::InvalidByteStringLiteral),
-            (r#"b"\q""#, LexError::InvalidByteStringLiteral),
+            (r#"b"abc"#, LexError::UnterminatedStringLiteral),
+            (r#"b"\q""#, LexError::InvalidEscape),
             (r#"b"\u{D800}""#, LexError::InvalidUnicodeEscape),
-            ("b\"a\rb\"", LexError::InvalidByteStringLiteral),
-            (r#"b"a"x"#, LexError::InvalidByteStringLiteral),
+            ("b\"a\rb\"", LexError::BareCarriageReturn),
+            (r#"b"a"x"#, LexError::ReservedLiteralSuffix),
         ] {
             assert_eq!(lex(src), [(Err(error), 0..src.len())], "{src:?}");
         }
