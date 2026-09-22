@@ -1,5 +1,6 @@
 use crate::ast::{
-    Block, Expr, FnSig, GenericParam, Item, ItemKind, Param, Pat, SelfParam, Span, WherePred,
+    Block, Expr, ExprKind, FnSig, GenericParam, Item, ItemKind, Param, Pat, SelfParam, Span,
+    WherePred,
 };
 use crate::control::block_like;
 use crate::error::Error;
@@ -67,7 +68,16 @@ where
             .then_ignore(just(Token::RParen).rewind()),
         params.map(|params| (None, params)),
     ))
-    .delimited_by(just(Token::LParen), just(Token::RParen));
+    .delimited_by(just(Token::LParen), just(Token::RParen))
+    .recover_with(via_parser(nested_delimiters(
+        Token::LParen,
+        Token::RParen,
+        [
+            (Token::LBracket, Token::RBracket),
+            (Token::LBrace, Token::RBrace),
+        ],
+        |_| (None, Vec::new()),
+    )));
     let bounds = bounds(src, expr, block_like);
     let generic = choice((
         just(Token::Const)
@@ -123,7 +133,21 @@ where
         );
     choice((
         sig.clone()
-            .then(block)
+            .then(block.recover_with(via_parser(nested_delimiters(
+                Token::LBrace,
+                Token::RBrace,
+                [
+                    (Token::LParen, Token::RParen),
+                    (Token::LBracket, Token::RBracket),
+                ],
+                |span| Block {
+                    stmts: Vec::new(),
+                    expr: Some(Box::new(Expr {
+                        kind: ExprKind::Error,
+                        span,
+                    })),
+                },
+            ))))
             .map(|(sig, body)| ItemKind::Fn { sig, body }),
         just(Token::Extern)
             .ignore_then(sig)
