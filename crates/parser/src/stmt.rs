@@ -21,7 +21,7 @@ where
         .then(name)
         .then(
             just(Token::Colon)
-                .ignore_then(ty(src, expr.clone()))
+                .ignore_then(ty(src, expr.clone(), block_like.clone()))
                 .or_not(),
         )
         .then(just(Token::Eq).ignore_then(expr.clone()).or_not())

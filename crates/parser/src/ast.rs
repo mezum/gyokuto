@@ -185,6 +185,8 @@ pub enum GenericArg {
     },
     /// const generics の定数
     Const(Expr),
+    /// `dyn { .. }`。`dyn` のトレイトの、実行時に決まる型引数
+    Dyn(Expr),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

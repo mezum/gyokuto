@@ -199,6 +199,7 @@ impl AsSexpr for GenericArg {
             GenericArg::Type(ty) => ty.as_sexpr(),
             GenericArg::Binding { name, ty } => format!("{name} = {}", ty.as_sexpr()),
             GenericArg::Const(expr) => expr.as_sexpr(),
+            GenericArg::Dyn(expr) => list("dyn", [expr.as_sexpr()]),
         }
     }
 }
