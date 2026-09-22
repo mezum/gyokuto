@@ -1,8 +1,8 @@
 //! AST を S 式で表す
 
 use crate::ast::{
-    Block, Expr, ExprKind, Field, GenericArg, GenericArgs, Lit, Path, Stmt, StmtKind, Type,
-    TypeKind,
+    Block, Expr, ExprKind, Field, GenericArg, GenericArgs, Lit, Pat, PatKind, Path, Stmt, StmtKind,
+    Type, TypeKind,
 };
 use std::iter::once;
 
@@ -61,12 +61,7 @@ impl AsSexpr for Expr {
                 start,
                 end,
                 inclusive,
-            } => {
-                let end_point =
-                    |e: &Option<Box<Expr>>| e.as_ref().map_or("_".into(), AsSexpr::as_sexpr);
-                let op = if *inclusive { "..=" } else { ".." };
-                list(op, [end_point(start), end_point(end)])
-            }
+            } => range(start, end, *inclusive),
             ExprKind::Assign { op, place, value } => {
                 let op = op.map_or(String::new(), |op| format!("{op:?}"));
                 list(&format!("{op}="), sexprs([place, value]))
@@ -125,6 +120,42 @@ impl AsSexpr for Stmt {
             ),
             StmtKind::Semi(expr) => list("semi", [expr.as_sexpr()]),
             StmtKind::Expr(expr) => list("expr", [expr.as_sexpr()]),
+        }
+    }
+}
+
+fn range(start: &Option<Box<Expr>>, end: &Option<Box<Expr>>, inclusive: bool) -> String {
+    let end_point = |e: &Option<Box<Expr>>| e.as_ref().map_or("_".into(), AsSexpr::as_sexpr);
+    let op = if inclusive { "..=" } else { ".." };
+    list(op, [end_point(start), end_point(end)])
+}
+
+impl AsSexpr for Pat {
+    fn as_sexpr(&self) -> String {
+        match &self.kind {
+            PatKind::Wild => "_".to_string(),
+            PatKind::Rest => "..".to_string(),
+            PatKind::Ident { mutable, name, sub } => {
+                let binding = mutable
+                    .then(|| "mut".to_string())
+                    .into_iter()
+                    .chain(once(name.clone()));
+                match sub {
+                    None if !mutable => name.clone(),
+                    None => list("mut", once(name.clone())),
+                    Some(sub) => list("in", binding.chain(once(sub.as_sexpr()))),
+                }
+            }
+            PatKind::Lit(lit) => lit.as_sexpr(),
+            PatKind::Range {
+                start,
+                end,
+                inclusive,
+            } => range(start, end, *inclusive),
+            PatKind::Paren(pat) => list("paren", [pat.as_sexpr()]),
+            PatKind::Tuple(pats) => list("tuple", sexprs(pats)),
+            PatKind::Path(path) => path.as_sexpr(),
+            PatKind::Or(pats) => list("|", sexprs(pats)),
         }
     }
 }
