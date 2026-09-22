@@ -1,3 +1,75 @@
+use crate::ast::{Block, Expr, ExprKind, Span, Stmt, StmtKind};
+use crate::parser::Extra;
+use crate::types::ty;
+use chumsky::{input::ValueInput, prelude::*};
+use gyokuto_lexer::Token;
+
+/// ブロック `{ ... }` を解析する
+pub(crate) fn block<'tok, 'src: 'tok, I>(
+    src: &'src str,
+    expr: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
+) -> impl Parser<'tok, I, Block, Extra> + Clone
+where
+    I: ValueInput<'tok, Token = Token, Span = Span>,
+{
+    recursive(move |block| {
+        let block_like = block.map_with(|block, e| Expr {
+            kind: ExprKind::Block(block),
+            span: e.span(),
+        });
+        let name = just(Token::Ident)
+            .to_span()
+            .map(move |span: Span| src[span.into_range()].to_string());
+        let let_stmt = just(Token::Let)
+            .ignore_then(just(Token::Mut).or_not().map(|m| m.is_some()))
+            .then(name)
+            .then(
+                just(Token::Colon)
+                    .ignore_then(ty(src, expr.clone()))
+                    .or_not(),
+            )
+            .then(just(Token::Eq).ignore_then(expr.clone()).or_not())
+            .then_ignore(just(Token::Semi))
+            .map(|(((mutable, name), ty), init)| StmtKind::Let {
+                mutable,
+                name,
+                ty,
+                init,
+            });
+        let stmt = choice((
+            let_stmt,
+            block_like.map(StmtKind::Expr),
+            expr.clone()
+                .then_ignore(just(Token::Semi))
+                .map(StmtKind::Semi),
+        ))
+        .map_with(|kind, e| Stmt {
+            kind,
+            span: e.span(),
+        });
+        stmt.repeated()
+            .collect::<Vec<_>>()
+            .then(expr.or_not())
+            .delimited_by(just(Token::LBrace), just(Token::RBrace))
+            .map(|(mut stmts, expr)| {
+                let expr = expr.or_else(|| match stmts.pop() {
+                    Some(Stmt {
+                        kind: StmtKind::Expr(expr),
+                        ..
+                    }) => Some(expr),
+                    last => {
+                        stmts.extend(last);
+                        None
+                    }
+                });
+                Block {
+                    stmts,
+                    expr: expr.map(Box::new),
+                }
+            })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use crate::ast::ExprKind;
