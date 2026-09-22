@@ -7,4 +7,5 @@ license.workspace = true
 
 [dependencies]
 logos.workspace = true
+thiserror.workspace = true
 unicode-ident.workspace = true
