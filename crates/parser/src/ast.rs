@@ -27,6 +27,8 @@ pub enum ExprKind {
     MethodCall {
         receiver: Box<Expr>,
         method: String,
+        /// `a.f::<T>()` の型引数
+        generics: Option<GenericArgs>,
         args: Vec<Expr>,
     },
     Field {

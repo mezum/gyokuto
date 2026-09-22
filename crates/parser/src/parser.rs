@@ -208,6 +208,7 @@ where
                     PostfixOp::Method(method, args) => wrap(ExprKind::MethodCall {
                         receiver: lhs,
                         method,
+                        generics: None,
                         args,
                     }),
                     PostfixOp::Field(field) => wrap(ExprKind::Field { expr: lhs, field }),
@@ -974,6 +975,44 @@ mod tests {
         };
         assert_eq!(expr.span.into_range(), 0..5);
         assert_eq!(inner.span.into_range(), 0..3);
+    }
+
+    #[test]
+    fn path_with_turbofish() {
+        assert_eq!(parse_ok("Vec::<i32>::new"), "Vec<i32>::new");
+    }
+
+    #[test]
+    fn call_with_turbofish() {
+        assert_eq!(parse_ok("parse::<i32>(s)"), "(call parse<i32> s)");
+    }
+
+    #[test]
+    fn method_call_with_turbofish() {
+        assert_eq!(parse_ok("a.f::<T, U>(b)"), "(method a f<T, U> b)");
+    }
+
+    #[test]
+    fn turbofish_with_nested_generics() {
+        assert_eq!(
+            parse_ok("Vec::<Vec<i32>>::new()"),
+            "(call Vec<Vec<i32>>::new)"
+        );
+    }
+
+    #[test]
+    fn generic_args_in_expr_need_colons() {
+        assert!(!parse_expr("f<T>()").1.is_empty());
+    }
+
+    #[test]
+    fn method_generic_args_need_colons() {
+        assert!(!parse_expr("a.f<T>()").1.is_empty());
+    }
+
+    #[test]
+    fn unterminated_turbofish() {
+        assert!(!parse_expr("a::<T").1.is_empty());
     }
 
     #[test]

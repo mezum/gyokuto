@@ -41,9 +41,12 @@ impl Display for Expr {
             ExprKind::MethodCall {
                 receiver,
                 method,
+                generics,
                 args,
             } => {
-                let items: Vec<&dyn Display> = [receiver as &dyn Display, method]
+                let generics = generics.as_ref().map_or(String::new(), ToString::to_string);
+                let method = format!("{method}{generics}");
+                let items: Vec<&dyn Display> = [receiver as &dyn Display, &method]
                     .into_iter()
                     .chain(args.iter().map(|a| a as &dyn Display))
                     .collect();
