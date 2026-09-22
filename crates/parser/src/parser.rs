@@ -1,6 +1,7 @@
-use crate::ast::{Expr, ExprKind, Lit, Path, PathSegment, Span};
+use crate::ast::{BinaryOp, Expr, ExprKind, Lit, Path, PathSegment, Span, UnaryOp};
 use crate::error::Error;
 use crate::literal;
+use chumsky::pratt::{Associativity, Operator, infix, left, none, prefix};
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
 use logos::Logos;
@@ -112,7 +113,7 @@ where
             kind: ExprKind::Error,
             span,
         };
-        choice((
+        let atom = choice((
             bool_lit,
             lit,
             path(src).map(ExprKind::Path),
@@ -141,7 +142,85 @@ where
                 (Token::LBrace, Token::RBrace),
             ],
             error,
-        )))
+        )));
+
+        let unary = prefix(
+            11,
+            choice((
+                just(Token::Amp).then(just(Token::Mut)).to(UnaryOp::RefMut),
+                select! {
+                    Token::Minus => UnaryOp::Neg,
+                    Token::Bang => UnaryOp::Not,
+                    Token::Star => UnaryOp::Deref,
+                    Token::Amp => UnaryOp::Ref,
+                },
+            )),
+            |op, expr, e| Expr {
+                kind: ExprKind::Unary {
+                    op,
+                    expr: Box::new(expr),
+                },
+                span: e.span(),
+            },
+        );
+        atom.pratt((
+            unary,
+            binary(
+                left(10),
+                select! {
+                    Token::Star => BinaryOp::Mul,
+                    Token::Slash => BinaryOp::Div,
+                    Token::Percent => BinaryOp::Rem,
+                },
+            ),
+            binary(
+                left(9),
+                select! {
+                    Token::Plus => BinaryOp::Add,
+                    Token::Minus => BinaryOp::Sub,
+                },
+            ),
+            binary(
+                left(8),
+                select! {
+                    Token::Shl => BinaryOp::Shl,
+                    Token::Shr => BinaryOp::Shr,
+                },
+            ),
+            binary(left(7), just(Token::Amp).to(BinaryOp::BitAnd)),
+            binary(left(6), just(Token::Caret).to(BinaryOp::BitXor)),
+            binary(left(5), just(Token::Pipe).to(BinaryOp::BitOr)),
+            binary(
+                none(4),
+                select! {
+                    Token::EqEq => BinaryOp::Eq,
+                    Token::Ne => BinaryOp::Ne,
+                    Token::Lt => BinaryOp::Lt,
+                    Token::Gt => BinaryOp::Gt,
+                    Token::Le => BinaryOp::Le,
+                    Token::Ge => BinaryOp::Ge,
+                },
+            ),
+            binary(left(3), just(Token::AndAnd).to(BinaryOp::And)),
+            binary(left(2), just(Token::OrOr).to(BinaryOp::Or)),
+        ))
+    })
+}
+
+fn binary<'tok, I>(
+    associativity: Associativity,
+    op: impl Parser<'tok, I, BinaryOp, Extra> + Clone,
+) -> impl Operator<'tok, I, Expr, Extra> + Clone
+where
+    I: ValueInput<'tok, Token = Token, Span = Span>,
+{
+    infix(associativity, op, |lhs, op, rhs, e| Expr {
+        kind: ExprKind::Binary {
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+        },
+        span: e.span(),
     })
 }
 
