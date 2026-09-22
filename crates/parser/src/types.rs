@@ -24,6 +24,18 @@ where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
     recursive(|ty| {
+        let mut no_bounds = Recursive::declare();
+        let types = ty
+            .clone()
+            .separated_by(just(Token::Comma))
+            .allow_trailing()
+            .collect::<Vec<_>>()
+            .delimited_by(just(Token::LParen), just(Token::RParen));
+        let ret = just(Token::Arrow)
+            .ignore_then(no_bounds.clone())
+            .or_not()
+            .map(|ret: Option<Type>| ret.map(Box::new));
+
         let lit = literal(src).map_with(|kind, e| Expr {
             kind,
             span: e.span(),
@@ -55,7 +67,11 @@ where
             .allow_trailing()
             .collect()
             .delimited_by(just(Token::Lt), just(Token::Gt))
-            .map(GenericArgs::Angle);
+            .map(GenericArgs::Angle)
+            .or(types
+                .clone()
+                .then(ret.clone())
+                .map(|(inputs, output)| GenericArgs::Paren { inputs, output }));
         let type_path = path(src, args.or_not()).map(|segments| TypePath {
             segments: segments
                 .into_iter()
@@ -65,7 +81,7 @@ where
 
         let reference = just(Token::Amp)
             .ignore_then(just(Token::Mut).or_not())
-            .then(ty.clone())
+            .then(no_bounds.clone())
             .map(|(mutable, ty)| TypeKind::Ref {
                 mutable: mutable.is_some(),
                 ty: Box::new(ty),
@@ -100,40 +116,70 @@ where
                 },
             });
 
+        let fn_type = just(Token::Fn)
+            .ignore_then(types)
+            .then(ret)
+            .map(|(params, ret)| TypeKind::Fn { params, ret });
+
         let error = |span| Type {
             kind: TypeKind::Error,
             span,
         };
+        no_bounds.define(
+            choice((
+                type_path.clone().map(TypeKind::Path),
+                reference,
+                parens,
+                array,
+                fn_type,
+                just(Token::Dyn)
+                    .ignore_then(type_path.clone())
+                    .map(|path| TypeKind::Dyn(vec![path])),
+                just(Token::Impl)
+                    .ignore_then(type_path.clone())
+                    .map(|path| TypeKind::Impl(vec![path])),
+                just(Token::Bang).to(TypeKind::Never),
+                just(Token::Underscore).to(TypeKind::Infer),
+            ))
+            .map_with(|kind, e| Type {
+                kind,
+                span: e.span(),
+            })
+            .recover_with(via_parser(nested_delimiters(
+                Token::LParen,
+                Token::RParen,
+                [
+                    (Token::LBracket, Token::RBracket),
+                    (Token::LBrace, Token::RBrace),
+                ],
+                error,
+            )))
+            .recover_with(via_parser(nested_delimiters(
+                Token::LBracket,
+                Token::RBracket,
+                [
+                    (Token::LParen, Token::RParen),
+                    (Token::LBrace, Token::RBrace),
+                ],
+                error,
+            ))),
+        );
+
+        let bounds = type_path
+            .separated_by(just(Token::Plus))
+            .at_least(1)
+            .collect::<Vec<_>>();
         choice((
-            type_path.map(TypeKind::Path),
-            reference,
-            parens,
-            array,
-            just(Token::Bang).to(TypeKind::Never),
-            just(Token::Underscore).to(TypeKind::Infer),
+            just(Token::Dyn)
+                .ignore_then(bounds.clone())
+                .map(TypeKind::Dyn),
+            just(Token::Impl).ignore_then(bounds).map(TypeKind::Impl),
         ))
         .map_with(|kind, e| Type {
             kind,
             span: e.span(),
         })
-        .recover_with(via_parser(nested_delimiters(
-            Token::LParen,
-            Token::RParen,
-            [
-                (Token::LBracket, Token::RBracket),
-                (Token::LBrace, Token::RBrace),
-            ],
-            error,
-        )))
-        .recover_with(via_parser(nested_delimiters(
-            Token::LBracket,
-            Token::RBracket,
-            [
-                (Token::LParen, Token::RParen),
-                (Token::LBrace, Token::RBrace),
-            ],
-            error,
-        )))
+        .or(no_bounds)
     })
 }
 
