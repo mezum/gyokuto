@@ -201,6 +201,8 @@ mod tests {
             ("Vec<i32>", "Vec<i32>"),
             ("HashMap<K, V,>", "HashMap<K, V>"),
             ("Vec<Vec<i32> >", "Vec<Vec<i32>>"),
+            ("Vec<Vec<i32>>", "Vec<Vec<i32>>"),
+            ("A<B<C<D>>>", "A<B<C<D>>>"),
             ("a::B<T>::C", "a::B<T>::C"),
             ("Foo<>", "Foo<>"),
             ("Iterator<Item = T>", "Iterator<Item = T>"),

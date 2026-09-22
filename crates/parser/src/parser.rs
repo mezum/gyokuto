@@ -622,6 +622,18 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn operators_starting_with_gt_without_spaces() {
+        assert_eq!(parse_ok("a>b"), "(Gt a b)");
+        assert_eq!(parse_ok("a>=b"), "(Ge a b)");
+        assert_eq!(parse_ok("a>>b"), "(Shr a b)");
+        assert_eq!(parse_ok("a>>=b"), "(Shr= a b)");
+        assert_eq!(parse_expr("a>>b").0.unwrap().span.into_range(), 0..4);
+        for src in ["a > > b", "a > = b", "a >> = b", "a > >= b"] {
+            assert!(!parse_expr(src).1.is_empty(), "{src}");
+        }
+    }
+
+    #[test]
     fn comparisons_do_not_chain() {
         for src in ["a < b < c", "a == b == c", "a < b == c", "(a < b > c)"] {
             assert!(!parse_expr(src).1.is_empty(), "{src}");
