@@ -176,7 +176,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::{ErrorKind, Expected, LiteralError};
+    use crate::error::{ErrorKind, Expected, Found, LiteralError};
     use gyokuto_lexer::LexError;
 
     fn show(expr: &Expr) -> String {
@@ -344,7 +344,7 @@ mod tests {
         assert!(
             matches!(
                 &errors[0].kind,
-                ErrorKind::Syntax { found: Some(Token::Ident), expected }
+                ErrorKind::Syntax { found: Found::Token(Token::Ident), expected }
                     if expected.contains(&Expected::Token(Token::RParen))
             ),
             "{errors:?}"

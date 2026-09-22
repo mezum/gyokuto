@@ -22,9 +22,14 @@ pub enum ErrorKind {
     #[error("unexpected {found:?}, expected one of {expected:?}")]
     Syntax {
         expected: Vec<Expected>,
-        /// `None` は入力の終端
-        found: Option<Token>,
+        found: Found,
     },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Found {
+    Token(Token),
+    EndOfInput,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -82,7 +87,7 @@ impl<'a, I: Input<'a, Token = Token, Span = Span>> LabelError<'a, I, DefaultExpe
             span,
             kind: ErrorKind::Syntax {
                 expected,
-                found: found.as_deref().copied(),
+                found: found.map_or(Found::EndOfInput, |token| Found::Token(*token)),
             },
         }
     }

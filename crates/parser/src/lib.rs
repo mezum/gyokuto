@@ -5,5 +5,5 @@ mod error;
 mod literal;
 mod parser;
 
-pub use error::{Error, ErrorKind, Expected, LiteralError};
+pub use error::{Error, ErrorKind, Expected, Found, LiteralError};
 pub use parser::parse_expr;
