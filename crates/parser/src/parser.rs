@@ -203,6 +203,8 @@ mod tests {
             ExprKind::Tuple(es) => list("tuple", &es.iter().collect::<Vec<_>>()),
             ExprKind::Array(es) => list("array", &es.iter().collect::<Vec<_>>()),
             ExprKind::Repeat { elem, len } => list("repeat", &[elem, len]),
+            ExprKind::Unary { op, expr } => list(&format!("{op:?}"), &[expr]),
+            ExprKind::Binary { op, lhs, rhs } => list(&format!("{op:?}"), &[lhs, rhs]),
             ExprKind::Error => "error".to_string(),
         }
     }
@@ -357,6 +359,95 @@ mod tests {
         let (expr, errors) = parse_expr("[a, $]");
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert_eq!(show(&expr.unwrap()), "(array a error)");
+    }
+
+    #[test]
+    fn unary_operators() {
+        assert_eq!(parse_ok("-a"), "(Neg a)");
+        assert_eq!(parse_ok("!a"), "(Not a)");
+        assert_eq!(parse_ok("*a"), "(Deref a)");
+        assert_eq!(parse_ok("&a"), "(Ref a)");
+        assert_eq!(parse_ok("&mut a"), "(RefMut a)");
+        assert_eq!(parse_ok("-!*a"), "(Neg (Not (Deref a)))");
+        assert!(!parse_expr("&&a").1.is_empty());
+    }
+
+    #[test]
+    fn negative_literal_is_unary() {
+        assert_eq!(
+            parse_ok("-128i8"),
+            "(Neg Int { value: 128, suffix: Some(I8) })"
+        );
+    }
+
+    #[test]
+    fn binary_precedence() {
+        for (src, expected) in [
+            ("a * b + c", "(Add (Mul a b) c)"),
+            ("a + b * c", "(Add a (Mul b c))"),
+            ("a + b << c", "(Shl (Add a b) c)"),
+            ("a << b & c", "(BitAnd (Shl a b) c)"),
+            ("a & b ^ c", "(BitXor (BitAnd a b) c)"),
+            ("a ^ b | c", "(BitOr (BitXor a b) c)"),
+            ("a | b == c", "(Eq (BitOr a b) c)"),
+            ("a == b && c", "(And (Eq a b) c)"),
+            ("a && b || c", "(Or (And a b) c)"),
+            ("-a * b", "(Mul (Neg a) b)"),
+            ("(a + b) * c", "(Mul (paren (Add a b)) c)"),
+        ] {
+            assert_eq!(parse_ok(src), expected, "{src}");
+        }
+    }
+
+    #[test]
+    fn binary_operators() {
+        for (src, op) in [
+            ("a * b", "Mul"),
+            ("a / b", "Div"),
+            ("a % b", "Rem"),
+            ("a + b", "Add"),
+            ("a - b", "Sub"),
+            ("a << b", "Shl"),
+            ("a >> b", "Shr"),
+            ("a & b", "BitAnd"),
+            ("a ^ b", "BitXor"),
+            ("a | b", "BitOr"),
+            ("a == b", "Eq"),
+            ("a != b", "Ne"),
+            ("a < b", "Lt"),
+            ("a > b", "Gt"),
+            ("a <= b", "Le"),
+            ("a >= b", "Ge"),
+            ("a && b", "And"),
+            ("a || b", "Or"),
+        ] {
+            assert_eq!(parse_ok(src), format!("({op} a b)"), "{src}");
+        }
+    }
+
+    #[test]
+    fn left_associative() {
+        assert_eq!(parse_ok("a - b - c"), "(Sub (Sub a b) c)");
+        assert_eq!(parse_ok("a || b || c"), "(Or (Or a b) c)");
+    }
+
+    #[test]
+    fn comparisons_do_not_chain() {
+        for src in ["a < b < c", "a == b == c", "a < b == c", "(a < b > c)"] {
+            assert!(!parse_expr(src).1.is_empty(), "{src}");
+        }
+        assert_eq!(parse_ok("(a < b) == c"), "(Eq (paren (Lt a b)) c)");
+    }
+
+    #[test]
+    fn operator_spans() {
+        let (expr, _) = parse_expr("a + -b");
+        let expr = expr.unwrap();
+        assert_eq!(expr.span.into_range(), 0..6);
+        let ExprKind::Binary { rhs, .. } = expr.kind else {
+            panic!("{expr:?}");
+        };
+        assert_eq!(rhs.span.into_range(), 4..6);
     }
 
     #[test]
