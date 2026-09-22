@@ -17,7 +17,7 @@ const INT_SUFFIXES: [(&str, IntSuffix); 10] = [
 const FLOAT_SUFFIXES: [(&str, FloatSuffix); 2] =
     [("f32", FloatSuffix::F32), ("f64", FloatSuffix::F64)];
 
-/// リテラルのトークンを値に変換する。不正な内容は panic せずエラーとする
+/// リテラルのトークンを値に変換する
 pub(crate) fn decode(token: Token, text: &str) -> Result<Lit, &'static str> {
     let quoted = |prefix: usize| {
         text.get(prefix + 1..text.len().saturating_sub(1))
