@@ -3,6 +3,7 @@ use crate::ast::{
 };
 use crate::error::{Error, ErrorKind};
 use crate::literal;
+use crate::types::{angle_args, ty};
 use chumsky::pratt::{Associativity, Operator, infix, left, none, postfix, prefix};
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
@@ -73,6 +74,7 @@ where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
     recursive(|expr| {
+        let turbofish = just(Token::ColonColon).ignore_then(angle_args(src, ty(src, expr.clone())));
         let rest_items = just(Token::Comma).ignore_then(
             expr.clone()
                 .separated_by(just(Token::Comma))
@@ -123,7 +125,7 @@ where
         };
         let atom = choice((
             literal(src),
-            path(src, empty().to(None)).map(ExprKind::Path),
+            path(src, turbofish.clone().or_not()).map(ExprKind::Path),
             parens,
             array,
             just(Token::Error).to(ExprKind::Error),
@@ -154,7 +156,7 @@ where
         #[derive(Clone)]
         enum PostfixOp {
             Call(Vec<Expr>),
-            Method(String, Vec<Expr>),
+            Method(String, Option<GenericArgs>, Vec<Expr>),
             Field(Field),
             /// `t.0.1` のようにまとめて字句解析されたタプルのフィールドと、各フィールドの終端の位置
             TupleFields(Vec<(usize, usize)>),
@@ -176,8 +178,9 @@ where
                 args.clone().map(PostfixOp::Call),
                 just(Token::Dot)
                     .ignore_then(ident)
+                    .then(turbofish.clone().or_not())
                     .then(args)
-                    .map(|(method, args)| PostfixOp::Method(method, args)),
+                    .map(|((method, generics), args)| PostfixOp::Method(method, generics, args)),
                 just(Token::Dot)
                     .ignore_then(ident)
                     .map(|name| PostfixOp::Field(Field::Named(name))),
@@ -205,10 +208,10 @@ where
                 let lhs = Box::new(lhs);
                 match op {
                     PostfixOp::Call(args) => wrap(ExprKind::Call { callee: lhs, args }),
-                    PostfixOp::Method(method, args) => wrap(ExprKind::MethodCall {
+                    PostfixOp::Method(method, generics, args) => wrap(ExprKind::MethodCall {
                         receiver: lhs,
                         method,
-                        generics: None,
+                        generics,
                         args,
                     }),
                     PostfixOp::Field(field) => wrap(ExprKind::Field { expr: lhs, field }),

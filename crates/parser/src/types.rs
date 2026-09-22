@@ -40,38 +40,7 @@ where
             )
         };
 
-        let lit = literal(src).map_with(|kind, e| Expr {
-            kind,
-            span: e.span(),
-        });
-        let neg_lit = just(Token::Minus)
-            .ignore_then(lit.clone())
-            .map_with(|lit, e| Expr {
-                kind: ExprKind::Unary {
-                    op: UnaryOp::Neg,
-                    expr: Box::new(lit),
-                },
-                span: e.span(),
-            });
-        let binding = just(Token::Ident)
-            .to_span()
-            .then_ignore(just(Token::Eq))
-            .then(ty.clone())
-            .map(move |(name, ty): (Span, _)| GenericArg::Binding {
-                name: src[name.into_range()].to_string(),
-                ty,
-            });
-        let arg = choice((
-            binding,
-            lit.or(neg_lit).map(GenericArg::Const),
-            ty.clone().map(GenericArg::Type),
-        ));
-        let angle_args = arg
-            .separated_by(just(Token::Comma))
-            .allow_trailing()
-            .collect()
-            .delimited_by(just(Token::Lt), just(Token::Gt))
-            .map(GenericArgs::Angle);
+        let angle_args = angle_args(src, ty.clone());
         let type_path = |no_bounds| {
             let args =
                 angle_args.clone().or(signature(no_bounds)
@@ -179,6 +148,47 @@ where
         })
         .or(no_bounds)
     })
+}
+
+/// `<A, B>` の型引数を解析する
+pub(crate) fn angle_args<'tok, 'src: 'tok, I>(
+    src: &'src str,
+    ty: impl Parser<'tok, I, Type, Extra> + Clone,
+) -> impl Parser<'tok, I, GenericArgs, Extra> + Clone
+where
+    I: ValueInput<'tok, Token = Token, Span = Span>,
+{
+    let lit = literal(src).map_with(|kind, e| Expr {
+        kind,
+        span: e.span(),
+    });
+    let neg_lit = just(Token::Minus)
+        .ignore_then(lit.clone())
+        .map_with(|lit, e| Expr {
+            kind: ExprKind::Unary {
+                op: UnaryOp::Neg,
+                expr: Box::new(lit),
+            },
+            span: e.span(),
+        });
+    let binding = just(Token::Ident)
+        .to_span()
+        .then_ignore(just(Token::Eq))
+        .then(ty.clone())
+        .map(move |(name, ty): (Span, _)| GenericArg::Binding {
+            name: src[name.into_range()].to_string(),
+            ty,
+        });
+    let arg = choice((
+        binding,
+        lit.or(neg_lit).map(GenericArg::Const),
+        ty.map(GenericArg::Type),
+    ));
+    arg.separated_by(just(Token::Comma))
+        .allow_trailing()
+        .collect()
+        .delimited_by(just(Token::Lt), just(Token::Gt))
+        .map(GenericArgs::Angle)
 }
 
 #[cfg(test)]
