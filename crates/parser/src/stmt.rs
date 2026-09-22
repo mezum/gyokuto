@@ -93,16 +93,59 @@ mod tests {
 
     #[rstest]
     #[case("{ let x; }", "(block (let x))")]
-    #[case("{ let mut x; }", "(block (let mut x))")]
+    #[case("{ let mut x; }", "(block (let (mut x)))")]
     #[case("{ let x: T; }", "(block (let x (: T)))")]
     #[case("{ let x = a; }", "(block (let x (= a)))")]
     #[case(
         "{ let mut x: Vec<T> = a + b; }",
-        "(block (let mut x (: Vec<T>) (= (Add a b))))"
+        "(block (let (mut x) (: Vec<T>) (= (Add a b))))"
     )]
     #[case("{ let x = a; x }", "(block (let x (= a)) x)")]
     fn let_stmt(#[case] src: &str, #[case] expected: &str) {
         assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("{ let (a, b) = c; }", "(block (let (tuple a b) (= c)))")]
+    #[case("{ let A(x) | B(x) = a; }", "(block (let (| (A x) (B x)) (= a)))")]
+    #[case("{ let x in Some(_) = a; }", "(block (let (in x (Some _)) (= a)))")]
+    #[case("{ let x = a + { b }; }", "(block (let x (= (Add a (block b)))))")]
+    fn let_pattern(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case(
+        "{ let Some(x) = a else { return }; }",
+        "(block (let (Some x) (= a) (else (block (return)))))"
+    )]
+    #[case(
+        "{ let x: T = a.b() else { return }; }",
+        "(block (let x (: T) (= (method a b)) (else (block (return)))))"
+    )]
+    #[case(
+        "{ let Some(x) = (if a { b } else { c }) else { return }; }",
+        "(block (let (Some x) (= (paren (if a (block b) (block c)))) (else (block (return)))))"
+    )]
+    #[case(
+        "{ let Some(x) = f({ a }) else { return }; }",
+        "(block (let (Some x) (= (call f (block a))) (else (block (return)))))"
+    )]
+    fn let_else(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("{ let Some(x) = if a { b } else { c } else { return }; }")]
+    #[case("{ let x = { a } else { return }; }")]
+    #[case("{ let x = a + { b } else { return }; }")]
+    #[case("{ let x = -loop {} else { return }; }")]
+    #[case("{ let x = { a }.b else { return }; }")]
+    #[case("{ let x else { return }; }")]
+    #[case("{ let x = a else b; }")]
+    #[case("{ let x = a else { return } }")]
+    fn invalid_let_else(#[case] src: &str) {
+        assert!(!parse_expr(src).1.is_empty());
     }
 
     #[rstest]
@@ -130,7 +173,6 @@ mod tests {
     #[case("{ a b }")]
     #[case("{ let x }")]
     #[case("{ let x = a }")]
-    #[case("{ let 1; }")]
     #[case("{ let x: = a; }")]
     #[case("{ let mut; }")]
     #[case("{ a")]

@@ -196,6 +196,13 @@ mod tests {
     #[case("for i in a.. { b }", "(for i (.. a _) (block b))")]
     #[case("for i in a..b {}", "(for i (.. a b) (block))")]
     #[case("for i in f({ a }) {}", "(for i (call f (block a)) (block))")]
+    #[case("for (a, b) in xs {}", "(for (tuple a b) xs (block))")]
+    #[case("for Some(x) in xs {}", "(for (Some x) xs (block))")]
+    #[case(
+        "for (x in Some(_)) in xs {}",
+        "(for (paren (in x (Some _))) xs (block))"
+    )]
+    #[case("for (A | B) in xs {}", "(for (paren (| A B)) xs (block))")]
     fn loop_expr(#[case] src: &str, #[case] expected: &str) {
         assert_eq!(parse_ok(src), expected);
     }
@@ -217,7 +224,8 @@ mod tests {
     #[case("for { a }")]
     #[case("for i { a }")]
     #[case("for i in { a } { b }")]
-    #[case("for 1 in a {}")]
+    #[case("for x in Some(_) in xs {}")]
+    #[case("for A | B in xs {}")]
     #[case("for i in a")]
     #[case("{ loop {}; }")]
     fn invalid_loop(#[case] src: &str) {
