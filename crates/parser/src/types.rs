@@ -44,6 +44,17 @@ where
     })
 }
 
+/// `+` を含まない型 (TypeNoBounds) を解析する
+pub(crate) fn ty_no_bounds<'tok, 'src: 'tok, I>(
+    src: &'src str,
+    expr: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
+) -> impl Parser<'tok, I, Type, Extra> + Clone
+where
+    I: ValueInput<'tok, Token = Token, Span = Span>,
+{
+    no_bounds(src, expr.clone(), ty(src, expr))
+}
+
 /// TypeNoBounds を解析する。内側の型は `ty` で解析する
 fn no_bounds<'tok, 'src: 'tok, I>(
     src: &'src str,
@@ -173,6 +184,8 @@ where
 }
 
 /// `<A, B>` の型引数を解析する
+///
+/// `<` の後は常に型引数として扱い、閉じられなくても比較演算子などとして解析し直さない
 pub(crate) fn angle_args<'tok, 'src: 'tok, I>(
     src: &'src str,
     ty: impl Parser<'tok, I, Type, Extra> + Clone,
@@ -206,10 +219,14 @@ where
         lit.or(neg_lit).map(GenericArg::Const),
         ty.map(GenericArg::Type),
     ));
-    arg.separated_by(just(Token::Comma))
-        .allow_trailing()
-        .collect()
-        .delimited_by(just(Token::Lt), just(Token::Gt))
+    just(Token::Lt)
+        .ignore_then(
+            arg.separated_by(just(Token::Comma))
+                .allow_trailing()
+                .collect()
+                .then_ignore(just(Token::Gt))
+                .recover_with(via_parser(empty().map(|()| Vec::new()))),
+        )
         .map(GenericArgs::Angle)
 }
 

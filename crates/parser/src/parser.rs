@@ -3,7 +3,7 @@ use crate::ast::{
 };
 use crate::error::{Error, ErrorKind};
 use crate::literal;
-use crate::types::{angle_args, ty};
+use crate::types::{angle_args, ty, ty_no_bounds};
 use chumsky::pratt::{Associativity, Operator, infix, left, none, postfix, prefix};
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
@@ -173,7 +173,7 @@ where
             .to_span()
             .map(move |span: Span| src[span.into_range()].to_string());
         let postfix_op = postfix(
-            12,
+            13,
             choice((
                 args.clone().map(PostfixOp::Call),
                 just(Token::Dot)
@@ -232,8 +232,19 @@ where
                 }
             },
         );
-        let unary = prefix(
+        let cast = postfix(
             11,
+            just(Token::As).ignore_then(ty_no_bounds(src, expr.clone())),
+            |expr, ty, e| Expr {
+                kind: ExprKind::Cast {
+                    expr: Box::new(expr),
+                    ty: Box::new(ty),
+                },
+                span: e.span(),
+            },
+        );
+        let unary = prefix(
+            12,
             choice((
                 just(Token::Amp).then(just(Token::Mut)).to(UnaryOp::RefMut),
                 select! {
@@ -254,6 +265,7 @@ where
         let ops = atom.pratt((
             postfix_op,
             unary,
+            cast,
             binary(
                 left(10),
                 select! {
