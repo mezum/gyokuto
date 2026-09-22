@@ -79,9 +79,9 @@ pub enum ExprKind {
         cond: Box<Expr>,
         body: Block,
     },
-    /// `for var in iter { .. }`
+    /// `for pat in iter { .. }`
     For {
-        var: String,
+        pat: Box<Pat>,
         iter: Box<Expr>,
         body: Block,
     },
@@ -121,10 +121,11 @@ pub struct Stmt {
 #[derive(Debug, Clone, PartialEq)]
 pub enum StmtKind {
     Let {
-        mutable: bool,
-        name: String,
+        pat: Pat,
         ty: Option<Type>,
         init: Option<Expr>,
+        /// `let .. else { .. }` のブロック式
+        otherwise: Option<Box<Expr>>,
     },
     /// `expr;`
     Semi(Expr),

@@ -1,36 +1,51 @@
-use crate::ast::{Block, Expr, Span, Stmt, StmtKind};
+use crate::ast::{Block, Expr, ExprKind, Pat, Span, Stmt, StmtKind};
+use crate::error::{Error, ErrorKind};
 use crate::parser::Extra;
 use crate::types::ty;
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
 
-/// ブロック `{ ... }` を解析する。文の先頭のブロック様の式には `block_like` を使う
+/// ブロック `{ ... }` を解析する。文の先頭のブロック様の式には `block_like`、`let` の左辺には `pattern` を使う
 pub(crate) fn block<'tok, 'src: 'tok, I>(
     src: &'src str,
     expr: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
     block_like: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
+    pattern: impl Parser<'tok, I, Pat, Extra> + Clone + 'tok,
 ) -> impl Parser<'tok, I, Block, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
-    let name = just(Token::Ident)
-        .to_span()
-        .map(move |span: Span| src[span.into_range()].to_string());
+    let otherwise =
+        just(Token::Else).ignore_then(just(Token::LBrace).rewind().ignore_then(block_like.clone()));
+    let init = just(Token::Eq)
+        .ignore_then(expr.clone())
+        .then(otherwise.or_not())
+        .validate(|(init, otherwise), _, emitter| {
+            if otherwise.is_some() && has_bare_block_like(&init) {
+                emitter.emit(Error {
+                    span: init.span,
+                    kind: ErrorKind::BlockLikeBeforeElse,
+                });
+            }
+            (init, otherwise)
+        });
     let let_stmt = just(Token::Let)
-        .ignore_then(just(Token::Mut).or_not().map(|m| m.is_some()))
-        .then(name)
+        .ignore_then(pattern)
         .then(
             just(Token::Colon)
                 .ignore_then(ty(src, expr.clone(), block_like.clone()))
                 .or_not(),
         )
-        .then(just(Token::Eq).ignore_then(expr.clone()).or_not())
+        .then(init.or_not())
         .then_ignore(just(Token::Semi))
-        .map(|(((mutable, name), ty), init)| StmtKind::Let {
-            mutable,
-            name,
-            ty,
-            init,
+        .map(|((pat, ty), init)| {
+            let (init, otherwise) = init.unzip();
+            StmtKind::Let {
+                pat,
+                ty,
+                init,
+                otherwise: otherwise.flatten().map(Box::new),
+            }
         });
     let stmt = choice((
         let_stmt,
@@ -66,6 +81,46 @@ where
                 expr: expr.map(Box::new),
             }
         })
+}
+
+/// 括弧の外にブロック様の式を含むか
+fn has_bare_block_like(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::Block(_)
+        | ExprKind::If { .. }
+        | ExprKind::Loop(_)
+        | ExprKind::While { .. }
+        | ExprKind::For { .. }
+        | ExprKind::Match { .. } => true,
+        ExprKind::Call { callee: expr, .. }
+        | ExprKind::MethodCall { receiver: expr, .. }
+        | ExprKind::Field { expr, .. }
+        | ExprKind::Index { expr, .. }
+        | ExprKind::Try(expr)
+        | ExprKind::Cast { expr, .. }
+        | ExprKind::Unary { expr, .. } => has_bare_block_like(expr),
+        ExprKind::Binary { lhs, rhs, .. }
+        | ExprKind::Assign {
+            place: lhs,
+            value: rhs,
+            ..
+        } => has_bare_block_like(lhs) || has_bare_block_like(rhs),
+        ExprKind::Range { start, end, .. } => start
+            .iter()
+            .chain(end)
+            .any(|expr| has_bare_block_like(expr)),
+        ExprKind::Break(value) | ExprKind::Return(value) => {
+            value.as_deref().is_some_and(has_bare_block_like)
+        }
+        ExprKind::Lit(_)
+        | ExprKind::Path(_)
+        | ExprKind::Paren(_)
+        | ExprKind::Tuple(_)
+        | ExprKind::Array(_)
+        | ExprKind::Repeat { .. }
+        | ExprKind::Continue
+        | ExprKind::Error => false,
+    }
 }
 
 #[cfg(test)]

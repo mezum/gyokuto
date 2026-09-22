@@ -1,6 +1,6 @@
 use crate::ast::{Arm, Expr, ExprKind, Span};
 use crate::parser::{Extra, expr_with};
-use crate::pattern::pattern;
+use crate::pattern::{no_top_in, pattern};
 use crate::stmt::block;
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
@@ -17,6 +17,7 @@ where
         let cond = expr_with(src, expr.clone(), block_like.clone(), false);
         let pattern = pattern(src, expr.clone(), block_like.clone());
         let arm = pattern
+            .clone()
             .then(just(Token::If).ignore_then(expr.clone()).or_not())
             .then_ignore(just(Token::FatArrow))
             .then(expr.clone())
@@ -41,14 +42,12 @@ where
                 },
                 span: e.span(),
             });
-        let block = block(src, expr, block_like);
+        let for_pattern = no_top_in(src, expr.clone(), block_like.clone(), pattern.clone());
+        let block = block(src, expr, block_like, pattern);
         let block_expr = block.clone().map_with(|block, e| Expr {
             kind: ExprKind::Block(block),
             span: e.span(),
         });
-        let name = just(Token::Ident)
-            .to_span()
-            .map(move |span: Span| src[span.into_range()].to_string());
         let loop_expr = choice((
             just(Token::Loop)
                 .ignore_then(block.clone())
@@ -61,12 +60,12 @@ where
                     body,
                 }),
             just(Token::For)
-                .ignore_then(name)
+                .ignore_then(for_pattern)
                 .then_ignore(just(Token::In))
                 .then(cond.clone())
                 .then(block.clone())
-                .map(|((var, iter), body)| ExprKind::For {
-                    var,
+                .map(|((pat, iter), body)| ExprKind::For {
+                    pat: Box::new(pat),
                     iter: Box::new(iter),
                     body,
                 }),

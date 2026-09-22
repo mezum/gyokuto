@@ -79,8 +79,8 @@ impl AsSexpr for Expr {
             ),
             ExprKind::Loop(body) => list("loop", [body.as_sexpr()]),
             ExprKind::While { cond, body } => list("while", [cond.as_sexpr(), body.as_sexpr()]),
-            ExprKind::For { var, iter, body } => {
-                list("for", [var.clone(), iter.as_sexpr(), body.as_sexpr()])
+            ExprKind::For { pat, iter, body } => {
+                list("for", [pat.as_sexpr(), iter.as_sexpr(), body.as_sexpr()])
             }
             ExprKind::Match { scrutinee, arms } => {
                 list("match", once(scrutinee.as_sexpr()).chain(sexprs(arms)))
@@ -108,18 +108,20 @@ impl AsSexpr for Stmt {
     fn as_sexpr(&self) -> String {
         match &self.kind {
             StmtKind::Let {
-                mutable,
-                name,
+                pat,
                 ty,
                 init,
+                otherwise,
             } => list(
                 "let",
-                mutable
-                    .then(|| "mut".to_string())
-                    .into_iter()
-                    .chain(once(name.clone()))
+                once(pat.as_sexpr())
                     .chain(ty.as_ref().map(|ty| list(":", [ty.as_sexpr()])))
-                    .chain(init.as_ref().map(|init| list("=", [init.as_sexpr()]))),
+                    .chain(init.as_ref().map(|init| list("=", [init.as_sexpr()])))
+                    .chain(
+                        otherwise
+                            .as_ref()
+                            .map(|block| list("else", [block.as_sexpr()])),
+                    ),
             ),
             StmtKind::Semi(expr) => list("semi", [expr.as_sexpr()]),
             StmtKind::Expr(expr) => list("expr", [expr.as_sexpr()]),
