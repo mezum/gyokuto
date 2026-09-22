@@ -30,11 +30,11 @@ where
                             .ignore_then(block_expr.or(if_expr))
                             .or_not(),
                     )
-                    .map_with(|((cond, then), else_), e| Expr {
+                    .map_with(|((cond, then), otherwise), e| Expr {
                         kind: ExprKind::If {
                             cond: Box::new(cond),
                             then,
-                            else_: else_.map(Box::new),
+                            otherwise: otherwise.map(Box::new),
                         },
                         span: e.span(),
                     })

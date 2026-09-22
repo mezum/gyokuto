@@ -68,11 +68,11 @@ pub enum ExprKind {
         value: Box<Expr>,
     },
     Block(Block),
-    /// `if cond { .. } else ..`。`else_` はブロックか `if` の式
+    /// `if cond { .. } else ..`。`otherwise` はブロックか `if` の式
     If {
         cond: Box<Expr>,
         then: Block,
-        else_: Option<Box<Expr>>,
+        otherwise: Option<Box<Expr>>,
     },
     Break(Option<Box<Expr>>),
     Continue,
