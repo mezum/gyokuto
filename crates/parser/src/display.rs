@@ -55,6 +55,7 @@ impl Display for Expr {
             ExprKind::Field { expr, field } => list(f, "field", &[expr, field]),
             ExprKind::Index { expr, index } => list(f, "index", &[expr, index]),
             ExprKind::Try(expr) => list(f, "?", &[expr]),
+            ExprKind::Cast { expr, ty } => list(f, "as", &[expr, ty]),
             ExprKind::Unary { op, expr } => list(f, &format!("{op:?}"), &[expr]),
             ExprKind::Binary { op, lhs, rhs } => list(f, &format!("{op:?}"), &[lhs, rhs]),
             ExprKind::Range {

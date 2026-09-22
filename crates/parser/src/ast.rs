@@ -41,6 +41,11 @@ pub enum ExprKind {
     },
     /// `expr?`
     Try(Box<Expr>),
+    /// `expr as ty`
+    Cast {
+        expr: Box<Expr>,
+        ty: Box<Type>,
+    },
     Unary {
         op: UnaryOp,
         expr: Box<Expr>,

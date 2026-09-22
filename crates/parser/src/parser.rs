@@ -1019,6 +1019,56 @@ mod tests {
     }
 
     #[test]
+    fn cast() {
+        assert_eq!(parse_ok("a as T"), "(as a T)");
+    }
+
+    #[test]
+    fn chained_casts() {
+        assert_eq!(parse_ok("a as T as U"), "(as (as a T) U)");
+    }
+
+    #[test]
+    fn cast_binds_looser_than_neg() {
+        assert_eq!(parse_ok("-a as T"), "(as (Neg a) T)");
+    }
+
+    #[test]
+    fn cast_binds_tighter_than_mul() {
+        assert_eq!(parse_ok("a * b as T"), "(Mul a (as b T))");
+    }
+
+    #[test]
+    fn cast_after_postfix() {
+        assert_eq!(parse_ok("a.b as T"), "(as (field a b) T)");
+    }
+
+    #[test]
+    fn cast_to_generic_type() {
+        assert_eq!(parse_ok("a as Vec<T>"), "(as a Vec<T>)");
+    }
+
+    #[test]
+    fn cast_to_reference() {
+        assert_eq!(parse_ok("a as &T"), "(as a (& T))");
+    }
+
+    #[test]
+    fn cast_in_parens_then_comparison() {
+        assert_eq!(parse_ok("(a as usize) < b"), "(Lt (paren (as a usize)) b)");
+    }
+
+    #[test]
+    fn cast_type_does_not_take_bounds() {
+        assert_eq!(parse_ok("a as dyn A + B"), "(Add (as a (dyn A)) B)");
+    }
+
+    #[test]
+    fn lt_after_cast_starts_generic_args() {
+        assert!(!parse_expr("a as usize < b").1.is_empty());
+    }
+
+    #[test]
     fn trailing_tokens_are_error() {
         assert!(!parse_expr("a b").1.is_empty());
     }
