@@ -295,4 +295,51 @@ mod tests {
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert_eq!(pat.unwrap().as_sexpr(), "(slice error c)");
     }
+
+    #[rstest]
+    #[case("None", "None")]
+    #[case("Option::None", "Option::None")]
+    #[case("Some(x)", "(Some x)")]
+    #[case("Unit()", "(Unit)")]
+    #[case("Point(x, .., y)", "(Point x .. y)")]
+    #[case("Option::<T>::Some(_)", "(Option<T>::Some _)")]
+    #[case("Some(x) | None", "(| (Some x) None)")]
+    fn tuple_struct_pattern(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("P {}", "(struct P)")]
+    #[case("P { .. }", "(struct P ..)")]
+    #[case("P { x }", "(struct P (x x))")]
+    #[case("P { x, .. }", "(struct P (x x) ..)")]
+    #[case("P { x, .., }", "(struct P (x x) ..)")]
+    #[case("P { x, mut y }", "(struct P (x x) (y (mut y)))")]
+    #[case("P { x: Some(y), }", "(struct P (x (Some y)))")]
+    #[case("m::P { x: 'a'..='z' }", "(struct m::P (x (..= Char('a') Char('z'))))")]
+    fn struct_pattern(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("Some(x")]
+    #[case("P { x .. }")]
+    #[case("P { .., x }")]
+    #[case("P { x: }")]
+    #[case("P { mut x: y }")]
+    #[case("P { 0: x }")]
+    #[case("P { x, y")]
+    fn invalid_struct_pattern(#[case] src: &str) {
+        assert!(!parse_pattern(src).1.is_empty());
+    }
+
+    #[test]
+    fn field_pattern_spans() {
+        let pat = parse_pattern("P { x, y: _ }").0.unwrap();
+        let PatKind::Struct { fields, .. } = pat.kind else {
+            panic!("{pat:?}");
+        };
+        let spans: Vec<_> = fields.iter().map(|f| f.span.into_range()).collect();
+        assert_eq!(spans, [4..5, 7..11]);
+    }
 }
