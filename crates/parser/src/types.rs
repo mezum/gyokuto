@@ -234,6 +234,7 @@ where
 mod tests {
     use super::*;
     use crate::sexpr::AsSexpr;
+    use rstest::rstest;
 
     fn parse_ok(src: &str) -> String {
         let (ty, errors) = parse_type(src);
@@ -241,126 +242,122 @@ mod tests {
         ty.unwrap().as_sexpr()
     }
 
-    #[test]
-    fn path_types() {
-        for src in ["i32", "a::B", "crate::a::T", "Self", "super::T", "Vec<_>"] {
-            assert_eq!(parse_ok(src), src);
-        }
+    #[rstest]
+    #[case("i32")]
+    #[case("a::B")]
+    #[case("crate::a::T")]
+    #[case("Self")]
+    #[case("super::T")]
+    #[case("Vec<_>")]
+    fn path_type(#[case] src: &str) {
+        assert_eq!(parse_ok(src), src);
+    }
+
+    #[rstest]
+    #[case("Vec<i32>", "Vec<i32>")]
+    #[case("HashMap<K, V,>", "HashMap<K, V>")]
+    #[case("Vec<Vec<i32> >", "Vec<Vec<i32>>")]
+    #[case("Vec<Vec<i32>>", "Vec<Vec<i32>>")]
+    #[case("A<B<C<D>>>", "A<B<C<D>>>")]
+    #[case("a::B<T>::C", "a::B<T>::C")]
+    #[case("Foo<>", "Foo<>")]
+    #[case("Iterator<Item = T>", "Iterator<Item = T>")]
+    #[case("Buffer<16>", "Buffer<Int { value: 16, suffix: None }>")]
+    #[case("Buffer<-1>", "Buffer<(Neg Int { value: 1, suffix: None })>")]
+    #[case("Flag<true>", "Flag<true>")]
+    fn generic_args(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("&T", "(& T)")]
+    #[case("&mut T", "(&mut T)")]
+    #[case("&mut [u8]", "(&mut (slice u8))")]
+    fn reference_type(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
     }
 
     #[test]
-    fn generic_args() {
-        for (src, expected) in [
-            ("Vec<i32>", "Vec<i32>"),
-            ("HashMap<K, V,>", "HashMap<K, V>"),
-            ("Vec<Vec<i32> >", "Vec<Vec<i32>>"),
-            ("Vec<Vec<i32>>", "Vec<Vec<i32>>"),
-            ("A<B<C<D>>>", "A<B<C<D>>>"),
-            ("a::B<T>::C", "a::B<T>::C"),
-            ("Foo<>", "Foo<>"),
-            ("Iterator<Item = T>", "Iterator<Item = T>"),
-            ("Buffer<16>", "Buffer<Int { value: 16, suffix: None }>"),
-            ("Buffer<-1>", "Buffer<(Neg Int { value: 1, suffix: None })>"),
-            ("Flag<true>", "Flag<true>"),
-        ] {
-            assert_eq!(parse_ok(src), expected, "{src}");
-        }
-    }
-
-    #[test]
-    fn reference_types() {
-        assert_eq!(parse_ok("&T"), "(& T)");
-        assert_eq!(parse_ok("&mut T"), "(&mut T)");
-        assert_eq!(parse_ok("&mut [u8]"), "(&mut (slice u8))");
+    fn double_reference_type_is_error() {
         assert!(!parse_type("&&T").1.is_empty());
     }
 
-    #[test]
-    fn tuple_and_paren_types() {
-        assert_eq!(parse_ok("()"), "(tuple)");
-        assert_eq!(parse_ok("(T)"), "(paren T)");
-        assert_eq!(parse_ok("(T,)"), "(tuple T)");
-        assert_eq!(parse_ok("(A, B)"), "(tuple A B)");
+    #[rstest]
+    #[case("()", "(tuple)")]
+    #[case("(T)", "(paren T)")]
+    #[case("(T,)", "(tuple T)")]
+    #[case("(A, B)", "(tuple A B)")]
+    fn tuple_or_paren_type(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
     }
 
-    #[test]
-    fn array_and_slice_types() {
-        assert_eq!(parse_ok("[T; n]"), "(array T n)");
-        assert_eq!(parse_ok("[T]"), "(slice T)");
-        assert_eq!(
-            parse_ok("[[u8; n]; m + 1]"),
-            "(array (array u8 n) (Add m Int { value: 1, suffix: None }))"
-        );
+    #[rstest]
+    #[case("[T; n]", "(array T n)")]
+    #[case("[T]", "(slice T)")]
+    #[case(
+        "[[u8; n]; m + 1]",
+        "(array (array u8 n) (Add m Int { value: 1, suffix: None }))"
+    )]
+    fn array_or_slice_type(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
     }
 
-    #[test]
-    fn fn_types() {
-        assert_eq!(parse_ok("fn()"), "(fn ())");
-        assert_eq!(parse_ok("fn(A, B,) -> C"), "(fn (A B) C)");
-        assert_eq!(parse_ok("fn(fn(A)) -> !"), "(fn ((fn (A))) !)");
+    #[rstest]
+    #[case("fn()", "(fn ())")]
+    #[case("fn(A, B,) -> C", "(fn (A B) C)")]
+    #[case("fn(fn(A)) -> !", "(fn ((fn (A))) !)")]
+    fn fn_type(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
     }
 
-    #[test]
-    fn parenthesized_generic_args() {
-        assert_eq!(parse_ok("Fn(A) -> B"), "Fn(A) -> B");
-        assert_eq!(parse_ok("FnMut()"), "FnMut()");
-        assert_eq!(
-            parse_ok("Box<dyn Fn(i32) -> i32>"),
-            "Box<(dyn Fn(i32) -> i32)>"
-        );
+    #[rstest]
+    #[case("Fn(A) -> B", "Fn(A) -> B")]
+    #[case("FnMut()", "FnMut()")]
+    #[case("Box<dyn Fn(i32) -> i32>", "Box<(dyn Fn(i32) -> i32)>")]
+    fn parenthesized_generic_args(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
     }
 
-    #[test]
-    fn dyn_and_impl_types() {
-        for (src, expected) in [
-            ("dyn A", "(dyn A)"),
-            ("dyn A + B", "(dyn A B)"),
-            (
-                "impl Iterator<Item = T> + Clone",
-                "(impl Iterator<Item = T> Clone)",
-            ),
-            ("&dyn A", "(& (dyn A))"),
-            ("&(dyn A + B)", "(& (paren (dyn A B)))"),
-            ("dyn Fn() -> A + B", "(dyn Fn() -> A B)"),
-            ("Vec<dyn A + B>", "Vec<(dyn A B)>"),
-        ] {
-            assert_eq!(parse_ok(src), expected, "{src}");
-        }
+    #[rstest]
+    #[case("dyn A", "(dyn A)")]
+    #[case("dyn A + B", "(dyn A B)")]
+    #[case("impl Iterator<Item = T> + Clone", "(impl Iterator<Item = T> Clone)")]
+    #[case("&dyn A", "(& (dyn A))")]
+    #[case("&(dyn A + B)", "(& (paren (dyn A B)))")]
+    #[case("dyn Fn() -> A + B", "(dyn Fn() -> A B)")]
+    #[case("Vec<dyn A + B>", "Vec<(dyn A B)>")]
+    fn dyn_or_impl_type(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
     }
 
-    #[test]
-    fn bounds_need_parens_in_ambiguous_positions() {
-        for src in [
-            "&dyn A + B",
-            "fn() -> dyn A + B",
-            "dyn",
-            "dyn A +",
-            "impl &A",
-        ] {
-            assert!(!parse_type(src).1.is_empty(), "{src}");
-        }
+    #[rstest]
+    #[case("&dyn A + B")]
+    #[case("fn() -> dyn A + B")]
+    #[case("dyn")]
+    #[case("dyn A +")]
+    #[case("impl &A")]
+    fn bounds_need_parens_in_ambiguous_position(#[case] src: &str) {
+        assert!(!parse_type(src).1.is_empty());
     }
 
-    #[test]
-    fn never_and_infer_types() {
-        assert_eq!(parse_ok("!"), "!");
-        assert_eq!(parse_ok("_"), "_");
+    #[rstest]
+    #[case("!", "!")]
+    #[case("_", "_")]
+    fn never_or_infer_type(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
     }
 
-    #[test]
-    fn invalid_types() {
-        for src in [
-            "Vec<",
-            "a::",
-            "1",
-            "Vec<a + b>",
-            "Vec<T",
-            "[T; ]",
-            "&",
-            "(A B)",
-        ] {
-            assert!(!parse_type(src).1.is_empty(), "{src}");
-        }
+    #[rstest]
+    #[case("Vec<")]
+    #[case("a::")]
+    #[case("1")]
+    #[case("Vec<a + b>")]
+    #[case("Vec<T")]
+    #[case("[T; ]")]
+    #[case("&")]
+    #[case("(A B)")]
+    fn invalid_type(#[case] src: &str) {
+        assert!(!parse_type(src).1.is_empty());
     }
 
     #[test]
