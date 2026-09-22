@@ -4,20 +4,43 @@ use crate::stmt::block;
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
 
-/// ブロック様の式を解析する
+/// ブロック様の式を解析する。条件式には `cond` を使う
 pub(crate) fn block_like<'tok, 'src: 'tok, I>(
     src: &'src str,
     expr: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
+    cond: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
 ) -> impl Parser<'tok, I, Expr, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
     recursive(move |block_like| {
         let block = block(src, expr, block_like);
-        block.map_with(|block, e| Expr {
+        let block_expr = block.clone().map_with(|block, e| Expr {
             kind: ExprKind::Block(block),
             span: e.span(),
-        })
+        });
+        let if_expr = recursive({
+            let block_expr = block_expr.clone();
+            move |if_expr| {
+                just(Token::If)
+                    .ignore_then(cond)
+                    .then(block)
+                    .then(
+                        just(Token::Else)
+                            .ignore_then(block_expr.or(if_expr))
+                            .or_not(),
+                    )
+                    .map_with(|((cond, then), else_), e| Expr {
+                        kind: ExprKind::If {
+                            cond: Box::new(cond),
+                            then,
+                            else_: else_.map(Box::new),
+                        },
+                        span: e.span(),
+                    })
+            }
+        });
+        choice((block_expr, if_expr))
     })
 }
 

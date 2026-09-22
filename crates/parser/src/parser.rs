@@ -75,7 +75,8 @@ where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
     recursive(|expr| {
-        let block_like = block_like(src, expr.clone()).boxed();
+        let cond = expr_with(src, expr.clone(), None);
+        let block_like = block_like(src, expr.clone(), cond).boxed();
         expr_with(src, expr, Some(block_like))
     })
 }
@@ -379,7 +380,20 @@ where
             Token::ShlEq => Some(BinaryOp::Shl),
         }
         .or(glued(&[Token::Gt, Token::Gt, Token::Eq]).to(Some(BinaryOp::Shr)));
-        range
+        let jump = choice((
+            just(Token::Break)
+                .ignore_then(this.clone().or_not())
+                .map(|value| ExprKind::Break(value.map(Box::new))),
+            just(Token::Continue).to(ExprKind::Continue),
+            just(Token::Return)
+                .ignore_then(this.clone().or_not())
+                .map(|value| ExprKind::Return(value.map(Box::new))),
+        ))
+        .map_with(|kind, e| Expr {
+            kind,
+            span: e.span(),
+        });
+        let assign = range
             .then(assign_op.then(this).or_not())
             .map_with(|(place, assign), e| match assign {
                 None => place,
@@ -391,7 +405,8 @@ where
                     },
                     span: e.span(),
                 },
-            })
+            });
+        choice((jump, assign))
     })
 }
 
