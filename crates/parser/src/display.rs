@@ -1,8 +1,6 @@
 //! AST を S 式で表示する
 
-use crate::ast::{
-    Expr, ExprKind, Field, GenericArg, GenericArgs, Lit, Path, Type, TypeKind, TypePath,
-};
+use crate::ast::{Expr, ExprKind, Field, GenericArg, GenericArgs, Lit, Path, Type, TypeKind};
 use std::fmt::{self, Display, Formatter};
 use std::iter::once;
 
@@ -22,13 +20,6 @@ fn join<T: Display>(items: &[T], separator: &str) -> String {
 
 fn displays<T: Display>(items: &[T]) -> Vec<&dyn Display> {
     items.iter().map(|item| item as &dyn Display).collect()
-}
-
-impl Display for Path {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let segments: Vec<_> = self.segments.iter().map(|s| s.as_str()).collect();
-        write!(f, "{}", segments.join("::"))
-    }
 }
 
 impl Display for Expr {
@@ -114,14 +105,14 @@ impl Display for Type {
     }
 }
 
-impl Display for TypePath {
+impl Display for Path {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let segments: Vec<_> = self
             .segments
             .iter()
             .map(|s| {
                 let args = s.args.as_ref().map_or(String::new(), ToString::to_string);
-                format!("{}{args}", s.segment.as_str())
+                format!("{}{args}", s.name.as_str())
             })
             .collect();
         write!(f, "{}", segments.join("::"))

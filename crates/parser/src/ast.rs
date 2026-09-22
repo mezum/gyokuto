@@ -79,7 +79,7 @@ pub struct Type {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeKind {
-    Path(TypePath),
+    Path(Path),
     Ref {
         mutable: bool,
         ty: Box<Type>,
@@ -98,26 +98,15 @@ pub enum TypeKind {
         ret: Option<Box<Type>>,
     },
     /// `dyn A + B`
-    Dyn(Vec<TypePath>),
+    Dyn(Vec<Path>),
     /// `impl A + B`
-    Impl(Vec<TypePath>),
+    Impl(Vec<Path>),
     /// `!`
     Never,
     /// `_`
     Infer,
     /// 構文エラーから回復した箇所
     Error,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct TypePath {
-    pub segments: Vec<TypePathSegment>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct TypePathSegment {
-    pub segment: PathSegment,
-    pub args: Option<GenericArgs>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -218,7 +207,13 @@ pub struct Path {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum PathSegment {
+pub struct PathSegment {
+    pub name: PathName,
+    pub args: Option<GenericArgs>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PathName {
     Ident(String),
     Crate,
     Super,
@@ -226,15 +221,15 @@ pub enum PathSegment {
     SelfType,
 }
 
-impl PathSegment {
+impl PathName {
     /// ソース上の表記を得る
     pub fn as_str(&self) -> &str {
         match self {
-            PathSegment::Ident(name) => name,
-            PathSegment::Crate => "crate",
-            PathSegment::Super => "super",
-            PathSegment::SelfValue => "self",
-            PathSegment::SelfType => "Self",
+            PathName::Ident(name) => name,
+            PathName::Crate => "crate",
+            PathName::Super => "super",
+            PathName::SelfValue => "self",
+            PathName::SelfType => "Self",
         }
     }
 }

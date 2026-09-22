@@ -1,7 +1,4 @@
-use crate::ast::{
-    Expr, ExprKind, GenericArg, GenericArgs, Span, Type, TypeKind, TypePath, TypePathSegment,
-    UnaryOp,
-};
+use crate::ast::{Expr, ExprKind, GenericArg, GenericArgs, Span, Type, TypeKind, UnaryOp};
 use crate::error::Error;
 use crate::parser::{Extra, expr, input, lex, literal, path};
 use chumsky::{input::ValueInput, prelude::*};
@@ -11,7 +8,7 @@ use std::iter::once;
 /// 型を解析する
 pub fn parse_type(src: &str) -> (Option<Type>, Vec<Error>) {
     let (tokens, mut errors) = lex(src);
-    let (ty, parse_errors) = ty(src)
+    let (ty, parse_errors) = ty(src, expr(src))
         .then_ignore(end())
         .parse(input(&tokens, src))
         .into_output_errors();
@@ -19,7 +16,11 @@ pub fn parse_type(src: &str) -> (Option<Type>, Vec<Error>) {
     (ty, errors)
 }
 
-pub(crate) fn ty<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, Type, Extra> + Clone
+/// 型を解析する。配列の長さなどの式は `expr` で解析する
+pub(crate) fn ty<'tok, 'src: 'tok, I>(
+    src: &'src str,
+    expr: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
+) -> impl Parser<'tok, I, Type, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
@@ -75,12 +76,7 @@ where
             let args =
                 angle_args.clone().or(signature(no_bounds)
                     .map(|(inputs, output)| GenericArgs::Paren { inputs, output }));
-            path(src, args.or_not()).map(|segments| TypePath {
-                segments: segments
-                    .into_iter()
-                    .map(|(segment, args)| TypePathSegment { segment, args })
-                    .collect(),
-            })
+            path(src, args.or_not())
         };
 
         let rest_items = just(Token::Comma).ignore_then(
@@ -102,7 +98,7 @@ where
 
         let array = ty
             .clone()
-            .then(just(Token::Semi).ignore_then(expr(src)).or_not())
+            .then(just(Token::Semi).ignore_then(expr).or_not())
             .delimited_by(just(Token::LBracket), just(Token::RBracket))
             .map(|(elem, len)| match len {
                 None => TypeKind::Slice(Box::new(elem)),

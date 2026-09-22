@@ -1,4 +1,6 @@
-use crate::ast::{BinaryOp, Expr, ExprKind, Field, Lit, Path, PathSegment, Span, UnaryOp};
+use crate::ast::{
+    BinaryOp, Expr, ExprKind, Field, GenericArgs, Lit, Path, PathName, PathSegment, Span, UnaryOp,
+};
 use crate::error::{Error, ErrorKind};
 use crate::literal;
 use chumsky::pratt::{Associativity, Operator, infix, left, none, postfix, prefix};
@@ -121,11 +123,7 @@ where
         };
         let atom = choice((
             literal(src),
-            path(src, empty()).map(|segments| {
-                ExprKind::Path(Path {
-                    segments: segments.into_iter().map(|(segment, ())| segment).collect(),
-                })
-            }),
+            path(src, empty().to(None)).map(ExprKind::Path),
             parens,
             array,
             just(Token::Error).to(ExprKind::Error),
@@ -444,40 +442,42 @@ where
     choice((bool_lit, lit))
 }
 
-/// パスを解析する。各セグメントの後には `args` を続けて解析する
-pub(crate) fn path<'tok, 'src: 'tok, I, O>(
+/// パスを解析する。各セグメントの後には型引数として `args` を続けて解析する
+pub(crate) fn path<'tok, 'src: 'tok, I>(
     src: &'src str,
-    args: impl Parser<'tok, I, O, Extra> + Clone,
-) -> impl Parser<'tok, I, Vec<(PathSegment, O)>, Extra> + Clone
+    args: impl Parser<'tok, I, Option<GenericArgs>, Extra> + Clone,
+) -> impl Parser<'tok, I, Path, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
+    let segment = |(name, args)| PathSegment { name, args };
     let ident = just(Token::Ident)
         .to_span()
-        .map(move |span: Span| PathSegment::Ident(src[span.into_range()].to_string()));
+        .map(move |span: Span| PathName::Ident(src[span.into_range()].to_string()));
     let head = choice((
         just(Token::Super)
-            .to(PathSegment::Super)
+            .to(PathName::Super)
             .then(args.clone())
+            .map(segment)
             .separated_by(just(Token::ColonColon))
             .at_least(1)
             .collect(),
         choice((
-            just(Token::Crate).to(PathSegment::Crate),
-            just(Token::SelfValue).to(PathSegment::SelfValue),
-            just(Token::SelfType).to(PathSegment::SelfType),
+            just(Token::Crate).to(PathName::Crate),
+            just(Token::SelfValue).to(PathName::SelfValue),
+            just(Token::SelfType).to(PathName::SelfType),
             ident,
         ))
         .then(args.clone())
-        .map(|segment| vec![segment]),
+        .map(move |name_args| vec![segment(name_args)]),
     ));
     let rest = just(Token::ColonColon)
-        .ignore_then(ident.then(args))
+        .ignore_then(ident.then(args).map(segment))
         .repeated()
         .collect::<Vec<_>>();
     head.then(rest).map(|(mut segments, rest)| {
         segments.extend(rest);
-        segments
+        Path { segments }
     })
 }
 
