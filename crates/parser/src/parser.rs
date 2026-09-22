@@ -856,6 +856,81 @@ mod tests {
     }
 
     #[test]
+    fn tuple_field() {
+        assert_eq!(parse_ok("t.0"), "(field t 0)");
+    }
+
+    #[test]
+    fn tuple_field_with_multiple_digits() {
+        assert_eq!(parse_ok("t.12"), "(field t 12)");
+    }
+
+    #[test]
+    fn nested_tuple_fields() {
+        assert_eq!(parse_ok("t.0.1"), "(field (field t 0) 1)");
+    }
+
+    #[test]
+    fn deeply_nested_tuple_fields() {
+        assert_eq!(parse_ok("t.1.2.3"), "(field (field (field t 1) 2) 3)");
+    }
+
+    #[test]
+    fn method_call_on_tuple_field() {
+        assert_eq!(parse_ok("t.0.f()"), "(method (field t 0) f)");
+    }
+
+    #[test]
+    fn tuple_index_with_suffix() {
+        assert_invalid_tuple_index("t.0u8");
+    }
+
+    #[test]
+    fn tuple_index_with_leading_zero() {
+        assert_invalid_tuple_index("t.01");
+    }
+
+    #[test]
+    fn tuple_index_with_underscore() {
+        assert_invalid_tuple_index("t.1_0");
+    }
+
+    #[test]
+    fn tuple_index_in_hex() {
+        assert_invalid_tuple_index("t.0x1");
+    }
+
+    #[test]
+    fn nested_tuple_index_with_exponent() {
+        assert_invalid_tuple_index("t.0.1e1");
+    }
+
+    #[test]
+    fn nested_tuple_index_with_suffix() {
+        assert_invalid_tuple_index("t.0.1f32");
+    }
+
+    #[test]
+    fn nested_tuple_index_with_leading_zero() {
+        assert_invalid_tuple_index("t.0.01");
+    }
+
+    fn assert_invalid_tuple_index(src: &str) {
+        let kinds: Vec<_> = parse_expr(src).1.into_iter().map(|e| e.kind).collect();
+        assert_eq!(kinds, [ErrorKind::InvalidTupleIndex], "{src}");
+    }
+
+    #[test]
+    fn nested_tuple_field_spans() {
+        let expr = parse_expr("t.0.1").0.unwrap();
+        let ExprKind::Field { expr: inner, .. } = &expr.kind else {
+            panic!("{expr:?}");
+        };
+        assert_eq!(expr.span.into_range(), 0..5);
+        assert_eq!(inner.span.into_range(), 0..3);
+    }
+
+    #[test]
     fn trailing_tokens_are_error() {
         assert!(!parse_expr("a b").1.is_empty());
     }

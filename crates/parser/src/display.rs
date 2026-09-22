@@ -86,6 +86,7 @@ impl Display for Field {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
             Field::Named(name) => write!(f, "{name}"),
+            Field::Index(index) => write!(f, "{index}"),
         }
     }
 }

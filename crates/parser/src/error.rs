@@ -19,6 +19,8 @@ pub enum ErrorKind {
     Lex(#[from] LexError),
     #[error(transparent)]
     Literal(#[from] LiteralError),
+    #[error("invalid tuple index")]
+    InvalidTupleIndex,
     #[error("unexpected {found:?}, expected one of {expected:?}")]
     Syntax {
         expected: Vec<Expected>,

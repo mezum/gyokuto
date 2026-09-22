@@ -67,6 +67,8 @@ pub enum ExprKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Field {
     Named(String),
+    /// タプルのフィールド `t.0`
+    Index(usize),
 }
 
 #[derive(Debug, Clone, PartialEq)]
