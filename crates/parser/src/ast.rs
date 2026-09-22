@@ -54,6 +54,18 @@ pub struct Type {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeKind {
     Path(TypePath),
+    Ref {
+        mutable: bool,
+        ty: Box<Type>,
+    },
+    Paren(Box<Type>),
+    Tuple(Vec<Type>),
+    /// `[elem; len]`
+    Array {
+        elem: Box<Type>,
+        len: Box<Expr>,
+    },
+    Slice(Box<Type>),
     /// `!`
     Never,
     /// `_`

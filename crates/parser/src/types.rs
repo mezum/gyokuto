@@ -81,6 +81,10 @@ mod tests {
     use crate::parser::tests::{show, show_segment};
 
     fn show_type(ty: &Type) -> String {
+        let list = |name: &str, types: &[&Type]| {
+            let items: String = types.iter().map(|t| format!(" {}", show_type(t))).collect();
+            format!("({name}{items})")
+        };
         match &ty.kind {
             TypeKind::Path(path) => path
                 .segments
@@ -96,6 +100,11 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
                 .join("::"),
+            TypeKind::Ref { mutable, ty } => list(if *mutable { "&mut" } else { "&" }, &[ty]),
+            TypeKind::Paren(t) => list("paren", &[t]),
+            TypeKind::Tuple(ts) => list("tuple", &ts.iter().collect::<Vec<_>>()),
+            TypeKind::Array { elem, len } => format!("(array {} {})", show_type(elem), show(len)),
+            TypeKind::Slice(t) => list("slice", &[t]),
             TypeKind::Never => "!".to_string(),
             TypeKind::Infer => "_".to_string(),
             TypeKind::Error => "error".to_string(),
@@ -141,6 +150,32 @@ mod tests {
     }
 
     #[test]
+    fn reference_types() {
+        assert_eq!(parse_ok("&T"), "(& T)");
+        assert_eq!(parse_ok("&mut T"), "(&mut T)");
+        assert_eq!(parse_ok("&mut [u8]"), "(&mut (slice u8))");
+        assert!(!parse_type("&&T").1.is_empty());
+    }
+
+    #[test]
+    fn tuple_and_paren_types() {
+        assert_eq!(parse_ok("()"), "(tuple)");
+        assert_eq!(parse_ok("(T)"), "(paren T)");
+        assert_eq!(parse_ok("(T,)"), "(tuple T)");
+        assert_eq!(parse_ok("(A, B)"), "(tuple A B)");
+    }
+
+    #[test]
+    fn array_and_slice_types() {
+        assert_eq!(parse_ok("[T; n]"), "(array T n)");
+        assert_eq!(parse_ok("[T]"), "(slice T)");
+        assert_eq!(
+            parse_ok("[[u8; n]; m + 1]"),
+            "(array (array u8 n) (Add m Int { value: 1, suffix: None }))"
+        );
+    }
+
+    #[test]
     fn never_and_infer_types() {
         assert_eq!(parse_ok("!"), "!");
         assert_eq!(parse_ok("_"), "_");
@@ -148,14 +183,21 @@ mod tests {
 
     #[test]
     fn invalid_types() {
-        for src in ["Vec<", "a::", "1", "Vec<a + b>", "Vec<T"] {
+        for src in ["Vec<", "a::", "[T; ]", "&", "(A B)", "1", "Vec<a + b>"] {
             assert!(!parse_type(src).1.is_empty(), "{src}");
         }
     }
 
     #[test]
     fn type_spans() {
-        let (ty, _) = parse_type(" Vec<T> ");
+        let (ty, _) = parse_type(" &mut T ");
         assert_eq!(ty.unwrap().span.into_range(), 1..7);
+    }
+
+    #[test]
+    fn recovers_inside_delimiters() {
+        let (ty, errors) = parse_type("(A, [B C])");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(show_type(&ty.unwrap()), "(tuple A error)");
     }
 }
