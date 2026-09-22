@@ -19,6 +19,8 @@ const FLOAT_SUFFIXES: [(&str, FloatSuffix); 2] =
 
 /// 字句解析で検証済みのリテラルのトークンを値に変換する
 pub(crate) fn decode(token: Token, text: &str) -> Result<Lit, &'static str> {
+    let quoted = |prefix: usize| &text[prefix + 1..text.len() - 1];
+    let utf8 = |bytes| String::from_utf8(bytes).expect("文字・文字列リテラルは UTF-8 になる");
     Ok(match token {
         Token::Int => decode_int(text)?,
         Token::Float => {
@@ -28,6 +30,12 @@ pub(crate) fn decode(token: Token, text: &str) -> Result<Lit, &'static str> {
                 suffix,
             }
         }
+        Token::Char => Lit::Char(utf8(unescape(quoted(0))).chars().next().unwrap()),
+        Token::Byte => Lit::Byte(unescape(quoted(1))[0]),
+        Token::Str => Lit::Str(utf8(unescape(quoted(0)))),
+        Token::ByteStr => Lit::ByteStr(unescape(quoted(1))),
+        Token::RawStr => Lit::Str(raw_body(&text[1..])),
+        Token::RawByteStr => Lit::ByteStr(raw_body(&text[2..]).into_bytes()),
         _ => unreachable!("リテラルではないトークン: {token:?}"),
     })
 }
@@ -48,6 +56,64 @@ fn split_suffix<'a, S: Copy>(text: &'a str, suffixes: &[(&str, S)]) -> (&'a str,
         .iter()
         .find_map(|&(name, suffix)| text.strip_suffix(name).map(|rest| (rest, Some(suffix))))
         .unwrap_or((text, None))
+}
+
+/// `r` / `br` の後の `#...#"` と `"#...#` を除き、CRLF を正規化した中身を得る
+fn raw_body(text: &str) -> String {
+    let hashes = text.len() - text.trim_start_matches('#').len();
+    text[hashes + 1..text.len() - hashes - 1].replace("\r\n", "\n")
+}
+
+/// エスケープ・行継続・CRLF を処理したバイト列を得る
+fn unescape(body: &str) -> Vec<u8> {
+    let body = body.replace("\r\n", "\n");
+    let mut bytes = Vec::new();
+    let mut chars = body.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            push_char(&mut bytes, c);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => bytes.push(b'\n'),
+            Some('r') => bytes.push(b'\r'),
+            Some('t') => bytes.push(b'\t'),
+            Some('0') => bytes.push(0),
+            Some(c @ ('\\' | '\'' | '"')) => bytes.push(c as u8),
+            Some('x') => {
+                let hex: String = chars.by_ref().take(2).collect();
+                bytes.push(u8::from_str_radix(&hex, 16).unwrap());
+            }
+            Some('u') => {
+                let hex: String = chars
+                    .by_ref()
+                    .take_while(|&c| c != '}')
+                    .filter(|&c| c != '{' && c != '_')
+                    .collect();
+                let value = u32::from_str_radix(&hex, 16).unwrap();
+                push_char(&mut bytes, char::from_u32(value).unwrap());
+            }
+            Some('\n') => {
+                chars = chars
+                    .as_str()
+                    .trim_start_matches(is_pattern_white_space)
+                    .chars()
+            }
+            other => unreachable!("字句解析で検証済みのエスケープ: {other:?}"),
+        }
+    }
+    bytes
+}
+
+fn push_char(bytes: &mut Vec<u8>, c: char) {
+    bytes.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
+}
+
+fn is_pattern_white_space(c: char) -> bool {
+    matches!(
+        c,
+        '\t'..='\r' | ' ' | '\u{85}' | '\u{200E}' | '\u{200F}' | '\u{2028}' | '\u{2029}'
+    )
 }
 
 #[cfg(test)]

@@ -39,7 +39,17 @@ where
             Token::True => ExprKind::Lit(Lit::Bool(true)),
             Token::False => ExprKind::Lit(Lit::Bool(false)),
         };
-        let lit = one_of([Token::Int, Token::Float]).validate(move |token, e, emitter| {
+        let lit = one_of([
+            Token::Int,
+            Token::Float,
+            Token::Char,
+            Token::Byte,
+            Token::Str,
+            Token::ByteStr,
+            Token::RawStr,
+            Token::RawByteStr,
+        ])
+        .validate(move |token, e, emitter| {
             let span: Span = e.span();
             literal::decode(token, &src[span.into_range()])
                 .map(ExprKind::Lit)
@@ -205,8 +215,8 @@ mod tests {
     #[test]
     fn literals_in_expressions() {
         assert_eq!(
-            parse_ok("(1u8, 2.5)"),
-            r#"(tuple Int { value: 1, suffix: Some(U8) } Float { digits: "2.5", suffix: None })"#
+            parse_ok("(1u8, 'a')"),
+            "(tuple Int { value: 1, suffix: Some(U8) } Char('a'))"
         );
     }
 
