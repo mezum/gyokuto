@@ -413,6 +413,36 @@ mod tests {
         assert!(!parse_module(src).1.is_empty());
     }
 
+    #[rstest]
+    #[case("enum E {}", "(enum E (variants))")]
+    #[case("enum E { A, B, }", "(enum E (variants A B))")]
+    #[case(
+        "enum E { A(T, U), B { x: T } }",
+        "(enum E (variants (A (tuple T U)) (B (fields (: x T)))))"
+    )]
+    #[case(
+        "enum E { A = X, B = { Y } }",
+        "(enum E (variants (= A X) (= B (block Y))))"
+    )]
+    #[case(
+        "enum E<T> where T: A { B(T) }",
+        "(enum E (generics T) (where (: T A)) (variants (B (tuple T))))"
+    )]
+    fn enum_item(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("enum E")]
+    #[case("enum E;")]
+    #[case("enum E { A B }")]
+    #[case("enum E { A = }")]
+    #[case("enum E { A(T); }")]
+    #[case("extern enum E {}")]
+    fn invalid_enum(#[case] src: &str) {
+        assert!(!parse_module(src).1.is_empty());
+    }
+
     #[test]
     fn deeply_nested_self_params() {
         let src = format!(
