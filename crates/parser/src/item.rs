@@ -56,28 +56,20 @@ where
         .separated_by(just(Token::Comma))
         .allow_trailing()
         .collect::<Vec<_>>();
-    let self_and_params = choice((
-        self_param
-            .map(Some)
-            .then(
-                just(Token::Comma)
-                    .ignore_then(params.clone())
-                    .or_not()
-                    .map(Option::unwrap_or_default),
-            )
-            .then_ignore(just(Token::RParen).rewind()),
-        params.map(|params| (None, params)),
-    ))
-    .delimited_by(just(Token::LParen), just(Token::RParen))
-    .recover_with(via_parser(nested_delimiters(
-        Token::LParen,
-        Token::RParen,
-        [
-            (Token::LBracket, Token::RBracket),
-            (Token::LBrace, Token::RBrace),
-        ],
-        |_| (None, Vec::new()),
-    )));
+    let self_and_params = self_param
+        .then_ignore(just(Token::Comma).or(just(Token::RParen).rewind()))
+        .or_not()
+        .then(params)
+        .delimited_by(just(Token::LParen), just(Token::RParen))
+        .recover_with(via_parser(nested_delimiters(
+            Token::LParen,
+            Token::RParen,
+            [
+                (Token::LBracket, Token::RBracket),
+                (Token::LBrace, Token::RBrace),
+            ],
+            |_| (None, Vec::new()),
+        )));
     let bounds = bounds(src, expr, block_like);
     let generic = choice((
         just(Token::Const)
@@ -324,6 +316,16 @@ mod tests {
         assert_eq!(errors.len(), 1, "{errors:?}");
         let items: Vec<_> = items.unwrap().iter().map(AsSexpr::as_sexpr).collect();
         assert_eq!(items.join(" "), expected);
+    }
+
+    #[test]
+    fn deeply_nested_self_params() {
+        let src = format!(
+            "{}0{}",
+            "fn f(self, x: [u8; { ".repeat(32),
+            " }]) {}".repeat(32)
+        );
+        assert!(parse_module(&src).1.is_empty());
     }
 
     #[test]
