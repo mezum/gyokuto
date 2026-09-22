@@ -1,6 +1,6 @@
 use crate::ast::{
-    Block, Expr, ExprKind, FnSig, GenericParam, Item, ItemKind, Param, Pat, SelfParam, Span,
-    WherePred,
+    Block, Expr, ExprKind, FieldDef, Fields, FnSig, GenericParam, Item, ItemKind, Param, Pat,
+    SelfParam, Span, StructDef, WherePred,
 };
 use crate::control::block_like;
 use crate::error::Error;
@@ -109,10 +109,10 @@ where
         .map(Option::unwrap_or_default);
     let sig = just(Token::Fn)
         .ignore_then(ident(src))
-        .then(generics)
+        .then(generics.clone())
         .then(self_and_params)
-        .then(just(Token::Arrow).ignore_then(ty).or_not())
-        .then(where_preds)
+        .then(just(Token::Arrow).ignore_then(ty.clone()).or_not())
+        .then(where_preds.clone())
         .map(
             |((((name, generics), (self_param, params)), ret), where_preds)| FnSig {
                 name,
@@ -123,7 +123,58 @@ where
                 where_preds,
             },
         );
+    let field = ident(src)
+        .then_ignore(just(Token::Colon))
+        .then(ty.clone())
+        .map(|(name, ty)| FieldDef { name, ty });
+    let named = field
+        .separated_by(just(Token::Comma))
+        .allow_trailing()
+        .collect()
+        .delimited_by(just(Token::LBrace), just(Token::RBrace))
+        .map(Fields::Named)
+        .recover_with(via_parser(nested_delimiters(
+            Token::LBrace,
+            Token::RBrace,
+            [
+                (Token::LParen, Token::RParen),
+                (Token::LBracket, Token::RBracket),
+            ],
+            |_| Fields::Named(Vec::new()),
+        )));
+    let tuple = ty
+        .separated_by(just(Token::Comma))
+        .allow_trailing()
+        .collect()
+        .delimited_by(just(Token::LParen), just(Token::RParen))
+        .map(Fields::Tuple)
+        .recover_with(via_parser(nested_delimiters(
+            Token::LParen,
+            Token::RParen,
+            [
+                (Token::LBracket, Token::RBracket),
+                (Token::LBrace, Token::RBrace),
+            ],
+            |_| Fields::Tuple(Vec::new()),
+        )));
+    let struct_def = just(Token::Struct)
+        .ignore_then(ident(src))
+        .then(generics)
+        .then(choice((
+            tuple
+                .then(where_preds.clone())
+                .then_ignore(just(Token::Semi))
+                .map(|(fields, where_preds)| (where_preds, fields)),
+            where_preds.then(choice((named, just(Token::Semi).to(Fields::Unit)))),
+        )))
+        .map(|((name, generics), (where_preds, fields))| StructDef {
+            name,
+            generics,
+            where_preds,
+            fields,
+        });
     choice((
+        struct_def.clone().map(ItemKind::Struct),
         sig.clone()
             .then(block.recover_with(via_parser(nested_delimiters(
                 Token::LBrace,
@@ -141,10 +192,10 @@ where
                 },
             ))))
             .map(|(sig, body)| ItemKind::Fn { sig, body }),
-        just(Token::Extern)
-            .ignore_then(sig)
-            .then_ignore(just(Token::Semi))
-            .map(ItemKind::ExternFn),
+        just(Token::Extern).ignore_then(choice((
+            sig.then_ignore(just(Token::Semi)).map(ItemKind::ExternFn),
+            struct_def.map(ItemKind::ExternStruct),
+        ))),
     ))
     .map_with(|kind, e| Item {
         kind,
