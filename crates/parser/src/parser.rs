@@ -163,7 +163,7 @@ where
                 span: e.span(),
             },
         );
-        atom.pratt((
+        let ops = atom.pratt((
             unary,
             binary(
                 left(10),
@@ -203,7 +203,62 @@ where
             ),
             binary(left(3), just(Token::AndAnd).to(BinaryOp::And)),
             binary(left(2), just(Token::OrOr).to(BinaryOp::Or)),
-        ))
+        ));
+
+        let range_tail = choice((
+            just(Token::DotDotEq)
+                .ignore_then(ops.clone())
+                .map(|end| (true, Some(end))),
+            just(Token::DotDot)
+                .ignore_then(ops.clone().or_not())
+                .map(|end| (false, end)),
+        ));
+        let range = |start: Option<Expr>, (inclusive, end): (bool, Option<Expr>)| ExprKind::Range {
+            start: start.map(Box::new),
+            end: end.map(Box::new),
+            inclusive,
+        };
+        let range = choice((
+            ops.then(range_tail.clone().or_not())
+                .map_with(move |(start, tail), e| match tail {
+                    None => start,
+                    Some(tail) => Expr {
+                        kind: range(Some(start), tail),
+                        span: e.span(),
+                    },
+                }),
+            range_tail.map_with(move |tail, e| Expr {
+                kind: range(None, tail),
+                span: e.span(),
+            }),
+        ));
+
+        let assign_op = select! {
+            Token::Eq => None,
+            Token::PlusEq => Some(BinaryOp::Add),
+            Token::MinusEq => Some(BinaryOp::Sub),
+            Token::StarEq => Some(BinaryOp::Mul),
+            Token::SlashEq => Some(BinaryOp::Div),
+            Token::PercentEq => Some(BinaryOp::Rem),
+            Token::AmpEq => Some(BinaryOp::BitAnd),
+            Token::PipeEq => Some(BinaryOp::BitOr),
+            Token::CaretEq => Some(BinaryOp::BitXor),
+            Token::ShlEq => Some(BinaryOp::Shl),
+            Token::ShrEq => Some(BinaryOp::Shr),
+        };
+        range
+            .then(assign_op.then(expr).or_not())
+            .map_with(|(place, assign), e| match assign {
+                None => place,
+                Some((op, value)) => Expr {
+                    kind: ExprKind::Assign {
+                        op,
+                        place: Box::new(place),
+                        value: Box::new(value),
+                    },
+                    span: e.span(),
+                },
+            })
     })
 }
 
