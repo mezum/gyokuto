@@ -1,3 +1,26 @@
+use crate::ast::{Expr, ExprKind, Span};
+use crate::parser::Extra;
+use crate::stmt::block;
+use chumsky::{input::ValueInput, prelude::*};
+use gyokuto_lexer::Token;
+
+/// ブロック様の式を解析する
+pub(crate) fn block_like<'tok, 'src: 'tok, I>(
+    src: &'src str,
+    expr: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
+) -> impl Parser<'tok, I, Expr, Extra> + Clone
+where
+    I: ValueInput<'tok, Token = Token, Span = Span>,
+{
+    recursive(move |block_like| {
+        let block = block(src, expr, block_like);
+        block.map_with(|block, e| Expr {
+            kind: ExprKind::Block(block),
+            span: e.span(),
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use crate::parse_expr;

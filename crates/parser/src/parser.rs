@@ -1,9 +1,9 @@
 use crate::ast::{
     BinaryOp, Expr, ExprKind, Field, GenericArgs, Lit, Path, PathName, PathSegment, Span, UnaryOp,
 };
+use crate::control::block_like;
 use crate::error::{Error, ErrorKind};
 use crate::literal;
-use crate::stmt::block;
 use crate::types::{angle_args, ty, ty_no_bounds};
 use chumsky::pratt::{Associativity, Operator, infix, left, none, postfix, prefix};
 use chumsky::{input::ValueInput, prelude::*};
@@ -75,6 +75,23 @@ where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
     recursive(|expr| {
+        let block_like = block_like(src, expr.clone()).boxed();
+        expr_with(src, expr, Some(block_like))
+    })
+}
+
+/// 式を解析する。括弧の内側の式には `expr` を使う
+///
+/// `block_like` が無い場合は、括弧の外にブロック様の式を含まない条件式を解析する
+fn expr_with<'tok, 'src: 'tok, I>(
+    src: &'src str,
+    expr: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
+    block_like: Option<Boxed<'tok, 'tok, I, Expr, Extra>>,
+) -> impl Parser<'tok, I, Expr, Extra> + Clone
+where
+    I: ValueInput<'tok, Token = Token, Span = Span>,
+{
+    recursive(move |this| {
         let turbofish = just(Token::ColonColon).ignore_then(angle_args(src, ty(src, expr.clone())));
         let rest_items = just(Token::Comma).ignore_then(
             expr.clone()
@@ -129,13 +146,26 @@ where
             path(src, turbofish.clone().or_not()).map(ExprKind::Path),
             parens,
             array,
-            block(src, expr.clone()).map(ExprKind::Block),
             just(Token::Error).to(ExprKind::Error),
         ))
         .map_with(|kind, e| Expr {
             kind,
             span: e.span(),
-        })
+        });
+        let atom = match block_like {
+            Some(block_like) => choice((atom, block_like))
+                .recover_with(via_parser(nested_delimiters(
+                    Token::LBrace,
+                    Token::RBrace,
+                    [
+                        (Token::LParen, Token::RParen),
+                        (Token::LBracket, Token::RBracket),
+                    ],
+                    error,
+                )))
+                .boxed(),
+            None => atom.boxed(),
+        }
         .recover_with(via_parser(nested_delimiters(
             Token::LParen,
             Token::RParen,
@@ -151,15 +181,6 @@ where
             [
                 (Token::LParen, Token::RParen),
                 (Token::LBrace, Token::RBrace),
-            ],
-            error,
-        )))
-        .recover_with(via_parser(nested_delimiters(
-            Token::LBrace,
-            Token::RBrace,
-            [
-                (Token::LParen, Token::RParen),
-                (Token::LBracket, Token::RBracket),
             ],
             error,
         )));
@@ -359,7 +380,7 @@ where
         }
         .or(glued(&[Token::Gt, Token::Gt, Token::Eq]).to(Some(BinaryOp::Shr)));
         range
-            .then(assign_op.then(expr).or_not())
+            .then(assign_op.then(this).or_not())
             .map_with(|(place, assign), e| match assign {
                 None => place,
                 Some((op, value)) => Expr {
