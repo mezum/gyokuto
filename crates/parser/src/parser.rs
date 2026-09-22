@@ -4,6 +4,7 @@ use crate::ast::{
 use crate::control::block_like;
 use crate::error::{Error, ErrorKind};
 use crate::literal;
+use crate::pattern::pattern;
 use crate::types::{angle_args, ty, ty_no_bounds};
 use chumsky::pratt::{Associativity, Operator, infix, left, none, postfix, prefix};
 use chumsky::{input::ValueInput, prelude::*};
@@ -79,7 +80,8 @@ where
 
 /// 式を解析する。括弧の内側の式には `expr`、ブロック様の式には `block_like` を使う
 ///
-/// `allow_block_like` が偽の場合は、括弧の外にブロック様の式を含まない条件式を解析する
+/// `allow_block_like` が偽の場合は、括弧の外にブロック様の式を含まない条件式を解析する。
+/// 条件式では `let pat = expr` も解析し、使える位置かは [`crate::control`] で検査する
 pub(crate) fn expr_with<'tok, 'src: 'tok, I>(
     src: &'src str,
     expr: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
@@ -207,7 +209,7 @@ where
             .to_span()
             .map(move |span: Span| src[span.into_range()].to_string());
         let postfix_op = postfix(
-            13,
+            14,
             choice((
                 args.clone().map(PostfixOp::Call),
                 just(Token::Dot)
@@ -267,7 +269,7 @@ where
             },
         );
         let cast = postfix(
-            11,
+            12,
             just(Token::As).ignore_then(ty_no_bounds(src, expr.clone(), block_like.clone())),
             |expr, ty, e| Expr {
                 kind: ExprKind::Cast {
@@ -278,7 +280,7 @@ where
             },
         );
         let unary = prefix(
-            12,
+            13,
             choice((
                 just(Token::Amp).then(just(Token::Mut)).to(UnaryOp::RefMut),
                 select! {
@@ -296,12 +298,27 @@ where
                 span: e.span(),
             },
         );
+        let let_cond = prefix(
+            4,
+            just(Token::Let)
+                .filter(move |_| !allow_block_like)
+                .ignore_then(pattern(src, expr.clone(), block_like.clone()))
+                .then_ignore(just(Token::Eq)),
+            |pat, expr, e| Expr {
+                kind: ExprKind::Let {
+                    pat: Box::new(pat),
+                    expr: Box::new(expr),
+                },
+                span: e.span(),
+            },
+        );
         let ops = atom.pratt((
             postfix_op,
             unary,
             cast,
+            let_cond,
             binary(
-                left(10),
+                left(11),
                 select! {
                     Token::Star => BinaryOp::Mul,
                     Token::Slash => BinaryOp::Div,
@@ -309,24 +326,24 @@ where
                 },
             ),
             binary(
-                left(9),
+                left(10),
                 select! {
                     Token::Plus => BinaryOp::Add,
                     Token::Minus => BinaryOp::Sub,
                 },
             ),
             binary(
-                left(8),
+                left(9),
                 select! {
                     Token::Shl => BinaryOp::Shl,
                 }
                 .or(glued(&[Token::Gt, Token::Gt]).to(BinaryOp::Shr)),
             ),
-            binary(left(7), just(Token::Amp).to(BinaryOp::BitAnd)),
-            binary(left(6), just(Token::Caret).to(BinaryOp::BitXor)),
-            binary(left(5), just(Token::Pipe).to(BinaryOp::BitOr)),
+            binary(left(8), just(Token::Amp).to(BinaryOp::BitAnd)),
+            binary(left(7), just(Token::Caret).to(BinaryOp::BitXor)),
+            binary(left(6), just(Token::Pipe).to(BinaryOp::BitOr)),
             binary(
-                none(4),
+                none(5),
                 select! {
                     Token::EqEq => BinaryOp::Eq,
                     Token::Ne => BinaryOp::Ne,

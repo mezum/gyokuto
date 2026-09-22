@@ -82,6 +82,7 @@ impl AsSexpr for Expr {
             ExprKind::For { pat, iter, body } => {
                 list("for", [pat.as_sexpr(), iter.as_sexpr(), body.as_sexpr()])
             }
+            ExprKind::Let { pat, expr } => list("let", [pat.as_sexpr(), expr.as_sexpr()]),
             ExprKind::Match { scrutinee, arms } => {
                 list("match", once(scrutinee.as_sexpr()).chain(sexprs(arms)))
             }

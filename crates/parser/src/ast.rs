@@ -85,6 +85,11 @@ pub enum ExprKind {
         iter: Box<Expr>,
         body: Block,
     },
+    /// 条件式の `let pat = expr`
+    Let {
+        pat: Box<Pat>,
+        expr: Box<Expr>,
+    },
     Match {
         scrutinee: Box<Expr>,
         arms: Vec<Arm>,

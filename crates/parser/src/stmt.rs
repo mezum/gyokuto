@@ -1,4 +1,5 @@
-use crate::ast::{Block, Expr, ExprKind, Pat, Span, Stmt, StmtKind};
+use crate::ast::{Block, Expr, Pat, Span, Stmt, StmtKind};
+use crate::control::has_bare_block_like;
 use crate::error::{Error, ErrorKind};
 use crate::parser::Extra;
 use crate::types::ty;
@@ -81,46 +82,6 @@ where
                 expr: expr.map(Box::new),
             }
         })
-}
-
-/// 括弧の外にブロック様の式を含むか
-fn has_bare_block_like(expr: &Expr) -> bool {
-    match &expr.kind {
-        ExprKind::Block(_)
-        | ExprKind::If { .. }
-        | ExprKind::Loop(_)
-        | ExprKind::While { .. }
-        | ExprKind::For { .. }
-        | ExprKind::Match { .. } => true,
-        ExprKind::Call { callee: expr, .. }
-        | ExprKind::MethodCall { receiver: expr, .. }
-        | ExprKind::Field { expr, .. }
-        | ExprKind::Index { expr, .. }
-        | ExprKind::Try(expr)
-        | ExprKind::Cast { expr, .. }
-        | ExprKind::Unary { expr, .. } => has_bare_block_like(expr),
-        ExprKind::Binary { lhs, rhs, .. }
-        | ExprKind::Assign {
-            place: lhs,
-            value: rhs,
-            ..
-        } => has_bare_block_like(lhs) || has_bare_block_like(rhs),
-        ExprKind::Range { start, end, .. } => start
-            .iter()
-            .chain(end)
-            .any(|expr| has_bare_block_like(expr)),
-        ExprKind::Break(value) | ExprKind::Return(value) => {
-            value.as_deref().is_some_and(has_bare_block_like)
-        }
-        ExprKind::Lit(_)
-        | ExprKind::Path(_)
-        | ExprKind::Paren(_)
-        | ExprKind::Tuple(_)
-        | ExprKind::Array(_)
-        | ExprKind::Repeat { .. }
-        | ExprKind::Continue
-        | ExprKind::Error => false,
-    }
 }
 
 #[cfg(test)]

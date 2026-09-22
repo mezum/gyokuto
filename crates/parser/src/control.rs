@@ -1,4 +1,5 @@
-use crate::ast::{Arm, Expr, ExprKind, Span};
+use crate::ast::{Arm, BinaryOp, Expr, ExprKind, Span};
+use crate::error::{Error, ErrorKind};
 use crate::parser::{Extra, expr_with};
 use crate::pattern::{no_top_in, pattern};
 use crate::stmt::block;
@@ -15,6 +16,19 @@ where
 {
     recursive(move |block_like| {
         let cond = expr_with(src, expr.clone(), block_like.clone(), false);
+        let check_lets = |allowed: bool| {
+            cond.clone().validate(move |cond: Expr, _, emitter| {
+                for span in misplaced_lets(&cond, allowed) {
+                    emitter.emit(Error {
+                        span,
+                        kind: ErrorKind::MisplacedLet,
+                    });
+                }
+                cond
+            })
+        };
+        let let_cond = check_lets(true);
+        let cond = check_lets(false);
         let pattern = pattern(src, expr.clone(), block_like.clone());
         let arm = pattern
             .clone()
@@ -53,7 +67,7 @@ where
                 .ignore_then(block.clone())
                 .map(ExprKind::Loop),
             just(Token::While)
-                .ignore_then(cond.clone())
+                .ignore_then(let_cond.clone())
                 .then(block.clone())
                 .map(|(cond, body)| ExprKind::While {
                     cond: Box::new(cond),
@@ -78,7 +92,7 @@ where
             let block_expr = block_expr.clone();
             move |if_expr| {
                 just(Token::If)
-                    .ignore_then(cond)
+                    .ignore_then(let_cond)
                     .then(block)
                     .then(
                         just(Token::Else)
@@ -97,6 +111,77 @@ where
         });
         choice((block_expr, if_expr, loop_expr, match_expr))
     })
+}
+
+/// 括弧の外にある直下の式
+fn bare_operands(expr: &Expr) -> Vec<&Expr> {
+    match &expr.kind {
+        ExprKind::Call { callee: expr, .. }
+        | ExprKind::MethodCall { receiver: expr, .. }
+        | ExprKind::Field { expr, .. }
+        | ExprKind::Index { expr, .. }
+        | ExprKind::Try(expr)
+        | ExprKind::Cast { expr, .. }
+        | ExprKind::Unary { expr, .. }
+        | ExprKind::Let { expr, .. } => vec![expr],
+        ExprKind::Binary { lhs, rhs, .. }
+        | ExprKind::Assign {
+            place: lhs,
+            value: rhs,
+            ..
+        } => vec![lhs, rhs],
+        ExprKind::Range { start, end, .. } => start.iter().chain(end).map(|e| &**e).collect(),
+        ExprKind::Break(value) | ExprKind::Return(value) => value.iter().map(|e| &**e).collect(),
+        ExprKind::Lit(_)
+        | ExprKind::Path(_)
+        | ExprKind::Paren(_)
+        | ExprKind::Tuple(_)
+        | ExprKind::Array(_)
+        | ExprKind::Repeat { .. }
+        | ExprKind::Block(_)
+        | ExprKind::If { .. }
+        | ExprKind::Loop(_)
+        | ExprKind::While { .. }
+        | ExprKind::For { .. }
+        | ExprKind::Match { .. }
+        | ExprKind::Continue
+        | ExprKind::Error => Vec::new(),
+    }
+}
+
+/// 括弧の外にブロック様の式を含むか
+pub(crate) fn has_bare_block_like(expr: &Expr) -> bool {
+    matches!(
+        expr.kind,
+        ExprKind::Block(_)
+            | ExprKind::If { .. }
+            | ExprKind::Loop(_)
+            | ExprKind::While { .. }
+            | ExprKind::For { .. }
+            | ExprKind::Match { .. }
+    ) || bare_operands(expr).into_iter().any(has_bare_block_like)
+}
+
+/// `&&` で連ねた最上位のオペランド以外にある `let` の位置。`allowed` が偽の場合は最上位でも使えない
+fn misplaced_lets(expr: &Expr, allowed: bool) -> Vec<Span> {
+    match &expr.kind {
+        ExprKind::Let {
+            expr: scrutinee, ..
+        } if allowed => misplaced_lets(scrutinee, false),
+        ExprKind::Let { .. } => vec![expr.span],
+        ExprKind::Binary {
+            op: BinaryOp::And,
+            lhs,
+            rhs,
+        } => [lhs, rhs]
+            .into_iter()
+            .flat_map(|operand| misplaced_lets(operand, allowed))
+            .collect(),
+        _ => bare_operands(expr)
+            .into_iter()
+            .flat_map(|operand| misplaced_lets(operand, false))
+            .collect(),
+    }
 }
 
 #[cfg(test)]
