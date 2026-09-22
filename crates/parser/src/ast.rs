@@ -36,6 +36,10 @@ pub enum Lit {
         digits: String,
         suffix: Option<FloatSuffix>,
     },
+    Char(char),
+    Byte(u8),
+    Str(String),
+    ByteStr(Vec<u8>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

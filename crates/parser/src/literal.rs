@@ -72,6 +72,10 @@ mod tests {
         })
     }
 
+    fn str(value: &str) -> Result<Lit, &'static str> {
+        Ok(Lit::Str(value.to_string()))
+    }
+
     #[test]
     fn integers() {
         assert_eq!(lit("0"), int(0, None));
@@ -91,5 +95,39 @@ mod tests {
         assert_eq!(lit("1_000.5"), float("1000.5", None));
         assert_eq!(lit("2.5E-3f32"), float("2.5E-3", Some(FloatSuffix::F32)));
         assert_eq!(lit("1f64"), float("1", Some(FloatSuffix::F64)));
+    }
+
+    #[test]
+    fn chars_and_bytes() {
+        assert_eq!(lit("'a'"), Ok(Lit::Char('a')));
+        assert_eq!(lit(r"'\n'"), Ok(Lit::Char('\n')));
+        assert_eq!(lit(r"'\''"), Ok(Lit::Char('\'')));
+        assert_eq!(lit(r"'\x41'"), Ok(Lit::Char('A')));
+        assert_eq!(lit(r"'\u{1F600}'"), Ok(Lit::Char('😀')));
+        assert_eq!(lit("b'a'"), Ok(Lit::Byte(b'a')));
+        assert_eq!(lit(r"b'\xFF'"), Ok(Lit::Byte(0xFF)));
+    }
+
+    #[test]
+    fn strings() {
+        assert_eq!(lit(r#""a\tb""#), str("a\tb"));
+        assert_eq!(lit(r#""\u{3042}""#), str("あ"));
+        assert_eq!(lit(r#""\\u{41}""#), str(r"\u{41}"));
+        assert_eq!(lit("\"a\r\nb\""), str("a\nb"));
+        assert_eq!(lit("\"a\\\n    b\""), str("ab"));
+        assert_eq!(lit("\"a\\\r\n    b\""), str("ab"));
+    }
+
+    #[test]
+    fn byte_strings() {
+        let expected = [&[0xFF][..], "ああ".as_bytes()].concat();
+        assert_eq!(lit(r#"b"\xFF\u{3042}あ""#), Ok(Lit::ByteStr(expected)));
+    }
+
+    #[test]
+    fn raw_strings() {
+        assert_eq!(lit(r###"r#"a\n"b"#"###), str(r#"a\n"b"#));
+        assert_eq!(lit("r\"a\r\nb\""), str("a\nb"));
+        assert_eq!(lit(r#"br"\x""#), Ok(Lit::ByteStr(br"\x".to_vec())));
     }
 }
