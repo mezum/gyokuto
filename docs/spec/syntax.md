@@ -24,7 +24,7 @@
 
 ```ebnf
 Expr        ::= AssignExpr
-PrimaryExpr ::= LiteralExpr | PathExpr | ParenExpr | TupleExpr | ArrayExpr
+PrimaryExpr ::= LiteralExpr | PathExpr | ParenExpr | TupleExpr | ArrayExpr | BlockExpr
 ```
 
 ### リテラル式
@@ -73,6 +73,16 @@ ArrayExpr ::= '[' ( Expr ( ',' Expr )* ','? )? ']'
 ```
 
 - `[a; n]` は `a` を `n` 個並べた配列となる
+
+### ブロック式
+
+```ebnf
+BlockExpr ::= '{' Stmt* Expr? '}'
+```
+
+- 末尾の `;` を付けない式をブロックの値とする
+  - 末尾の式が無い場合、ブロックの値は `()` となる
+- ブロック内の `let` で導入した変数のスコープはブロックの終わりまでとする
 
 ### 後置式
 
@@ -153,6 +163,28 @@ UnaryExpr  ::= ( '-' | '!' | '*' | '&' | '&' 'mut' ) UnaryExpr
 - 代入・複合代入は値が `()` の式とする
   - 右結合のため `a = b = c` は `a = (b = c)` と解析され、型検査で `()` の代入としてエラーとなる
   - 左辺が代入できる場所 (変数・フィールドなど) であるかは型検査で検査する
+
+## 文
+
+```ebnf
+Stmt          ::= LetStmt | ExprStmt
+LetStmt       ::= 'let' 'mut'? IDENT ( ':' Type )? ( '=' Expr )? ';'
+ExprStmt      ::= Expr ';'
+                | BlockLikeExpr
+BlockLikeExpr ::= BlockExpr
+```
+
+- `let` は変数を導入する
+  - `mut` を付けた変数のみ再代入できる。再代入の検査は型検査で行う
+  - 型を省略した場合は初期化の式から推論する
+  - 初期化の式を省略した場合、使用前に必ず代入されているかは型検査で検査する
+  - 同じ名前の `let` はそれまでの変数を隠す (shadowing)
+- ブロック様の式 (BlockLikeExpr) を文の先頭に置いた場合、`;` を付けずに文の終わりとする
+  - 後に `;` を書くと構文エラーとなる
+  - 後に演算子を続けない。`{ a } - 1` は `{ a }` と `-1` の 2 つの文となる
+  - 値を使う場合は `let` で束縛するか、`({ a }) - 1` のように括弧で囲む
+  - 文の値が `()` であるかは型検査で検査する
+  - ブロックの末尾に置いた場合は、ブロックの値となる
 
 ## 型
 
