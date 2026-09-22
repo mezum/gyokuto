@@ -139,6 +139,39 @@ pub enum StmtKind {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Item {
+    pub kind: ItemKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ItemKind {
+    Fn { sig: FnSig, body: Block },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FnSig {
+    pub name: String,
+    pub self_param: Option<SelfParam>,
+    pub params: Vec<Param>,
+    /// 無い場合はユニット型
+    pub ret: Option<Type>,
+}
+
+/// `self` / `mut self` / `&self` / `&mut self`
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelfParam {
+    Value { mutable: bool },
+    Ref { mutable: bool },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Param {
+    pub pat: Pat,
+    pub ty: Type,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Field {
     Named(String),
     /// タプルのフィールド `t.0`

@@ -1,8 +1,8 @@
 //! AST を S 式で表す
 
 use crate::ast::{
-    Arm, Block, Expr, ExprKind, Field, GenericArg, GenericArgs, Lit, Pat, PatKind, Path, Stmt,
-    StmtKind, Type, TypeKind,
+    Arm, Block, Expr, ExprKind, Field, GenericArg, GenericArgs, Item, ItemKind, Lit, Pat, PatKind,
+    Path, SelfParam, Stmt, StmtKind, Type, TypeKind,
 };
 use std::iter::once;
 
@@ -102,6 +102,33 @@ impl AsSexpr for Block {
                 .into_iter()
                 .chain(self.expr.as_ref().map(AsSexpr::as_sexpr)),
         )
+    }
+}
+
+impl AsSexpr for Item {
+    fn as_sexpr(&self) -> String {
+        match &self.kind {
+            ItemKind::Fn { sig, body } => {
+                let self_param = sig.self_param.map(|p| match p {
+                    SelfParam::Value { mutable: false } => "self".to_string(),
+                    SelfParam::Value { mutable: true } => "(mut self)".to_string(),
+                    SelfParam::Ref { mutable: false } => "(& self)".to_string(),
+                    SelfParam::Ref { mutable: true } => "(&mut self)".to_string(),
+                });
+                let params = self_param.into_iter().chain(
+                    sig.params
+                        .iter()
+                        .map(|p| list(":", [p.pat.as_sexpr(), p.ty.as_sexpr()])),
+                );
+                list(
+                    "fn",
+                    [sig.name.clone(), list("params", params)]
+                        .into_iter()
+                        .chain(sig.ret.as_ref().map(|ty| list("->", [ty.as_sexpr()])))
+                        .chain(once(body.as_sexpr())),
+                )
+            }
+        }
     }
 }
 

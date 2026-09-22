@@ -258,7 +258,9 @@ where
         .or(simple)
 }
 
-fn ident<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, String, Extra> + Clone
+pub(crate) fn ident<'tok, 'src: 'tok, I>(
+    src: &'src str,
+) -> impl Parser<'tok, I, String, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
