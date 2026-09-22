@@ -1,6 +1,6 @@
 use crate::ast::{
-    Block, Expr, ExprKind, FieldDef, Fields, FnSig, GenericParam, Item, ItemKind, Param, Pat,
-    SelfParam, Span, StructDef, WherePred,
+    Block, EnumDef, Expr, ExprKind, FieldDef, Fields, FnSig, GenericParam, Item, ItemKind, Param,
+    Pat, SelfParam, Span, StructDef, Variant, WherePred,
 };
 use crate::control::block_like;
 use crate::error::Error;
@@ -70,7 +70,7 @@ where
             ],
             |_| (None, Vec::new()),
         )));
-    let bounds = bounds(src, expr, block_like);
+    let bounds = bounds(src, expr.clone(), block_like);
     let generic = choice((
         just(Token::Const)
             .ignore_then(ident(src))
@@ -157,6 +157,42 @@ where
             ],
             |_| Fields::Tuple(Vec::new()),
         )));
+    let variant = ident(src)
+        .then(
+            choice((
+                named.clone().map(|fields| (fields, None)),
+                tuple.clone().map(|fields| (fields, None)),
+                just(Token::Eq)
+                    .ignore_then(expr)
+                    .map(|expr| (Fields::Unit, Some(expr))),
+            ))
+            .or_not(),
+        )
+        .map(|(name, rest)| {
+            let (fields, discriminant) = rest.unwrap_or((Fields::Unit, None));
+            Variant {
+                name,
+                fields,
+                discriminant,
+            }
+        });
+    let enum_def = just(Token::Enum)
+        .ignore_then(ident(src))
+        .then(generics.clone())
+        .then(where_preds.clone())
+        .then(
+            variant
+                .separated_by(just(Token::Comma))
+                .allow_trailing()
+                .collect()
+                .delimited_by(just(Token::LBrace), just(Token::RBrace)),
+        )
+        .map(|(((name, generics), where_preds), variants)| EnumDef {
+            name,
+            generics,
+            where_preds,
+            variants,
+        });
     let struct_def = just(Token::Struct)
         .ignore_then(ident(src))
         .then(generics)
@@ -175,6 +211,7 @@ where
         });
     choice((
         struct_def.clone().map(ItemKind::Struct),
+        enum_def.map(ItemKind::Enum),
         sig.clone()
             .then(block.recover_with(via_parser(nested_delimiters(
                 Token::LBrace,
