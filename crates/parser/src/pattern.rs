@@ -154,26 +154,16 @@ where
         pat,
         span: e.span(),
     });
-    let fields = field
-        .clone()
-        .then_ignore(just(Token::Comma))
-        .repeated()
-        .collect::<Vec<_>>()
-        .then(
-            choice((
-                field.map(|field| (Some(field), false)),
-                just(Token::DotDot)
-                    .then_ignore(just(Token::Comma).or_not())
-                    .to((None, true)),
-            ))
-            .or_not(),
-        )
-        .delimited_by(just(Token::LBrace), just(Token::RBrace))
-        .map(|(mut fields, last)| {
-            let (last, rest) = last.unwrap_or((None, false));
-            fields.extend(last);
-            (fields, rest)
-        });
+    let rest = just(Token::DotDot).then_ignore(just(Token::Comma).or_not());
+    let fields = choice((
+        rest.to((Vec::new(), true)),
+        field
+            .separated_by(just(Token::Comma))
+            .collect::<Vec<_>>()
+            .then(just(Token::Comma).ignore_then(rest.or_not()).or_not())
+            .map(|(fields, tail)| (fields, matches!(tail, Some(Some(_))))),
+    ))
+    .delimited_by(just(Token::LBrace), just(Token::RBrace));
 
     enum Suffix {
         Tuple(Vec<Pat>),
@@ -406,5 +396,11 @@ mod tests {
         };
         let spans: Vec<_> = fields.iter().map(|f| f.span.into_range()).collect();
         assert_eq!(spans, [4..5, 7..11]);
+    }
+
+    #[test]
+    fn deeply_nested_struct_patterns() {
+        let src = format!("{}_{}", "P { x: ".repeat(32), " }".repeat(32));
+        assert!(parse_pattern(&src).1.is_empty());
     }
 }
