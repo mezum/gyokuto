@@ -520,63 +520,48 @@ mod tests {
         assert_eq!(lex(src), [(Err(LexError::UnexpectedChar), 0..1)]);
     }
 
-    #[test]
-    fn integer_literals() {
-        for src in [
-            "0",
-            "123",
-            "1_000",
-            "1_",
-            "0xff",
-            "0xFF_FF",
-            "0x1f32",
-            "0o17",
-            "0b1010",
-            "1u8",
-            "1i64",
-            "0xffusize",
-            "0b1_u32",
-        ] {
-            assert_eq!(lex(src), [(Ok(Token::Int), 0..src.len())], "{src}");
-        }
+    #[rstest]
+    #[case("0")]
+    #[case("123")]
+    #[case("1_000")]
+    #[case("1_")]
+    #[case("0xff")]
+    #[case("0xFF_FF")]
+    #[case("0x1f32")]
+    #[case("0o17")]
+    #[case("0b1010")]
+    #[case("1u8")]
+    #[case("1i64")]
+    #[case("0xffusize")]
+    #[case("0b1_u32")]
+    fn integer_literal(#[case] src: &str) {
+        assert_eq!(lex(src), [(Ok(Token::Int), 0..src.len())]);
     }
 
-    #[test]
-    fn float_literals() {
-        for src in [
-            "1.0", "0.5", "1_000.5", "1e10", "2.5E-3", "1e+5", "1.0f32", "1f64", "1e10f32",
-        ] {
-            assert_eq!(lex(src), [(Ok(Token::Float), 0..src.len())], "{src}");
-        }
+    #[rstest]
+    #[case("1.0")]
+    #[case("0.5")]
+    #[case("1_000.5")]
+    #[case("1e10")]
+    #[case("2.5E-3")]
+    #[case("1e+5")]
+    #[case("1.0f32")]
+    #[case("1f64")]
+    #[case("1e10f32")]
+    fn float_literal(#[case] src: &str) {
+        assert_eq!(lex(src), [(Ok(Token::Float), 0..src.len())]);
     }
 
-    #[test]
-    fn number_followed_by_dot() {
-        assert_eq!(lex("1."), [(Ok(Token::Int), 0..1), (Ok(Token::Dot), 1..2)]);
-        assert_eq!(
-            lex("1..2"),
-            [
-                (Ok(Token::Int), 0..1),
-                (Ok(Token::DotDot), 1..3),
-                (Ok(Token::Int), 3..4)
-            ]
-        );
-        assert_eq!(
-            lex("1.abs"),
-            [
-                (Ok(Token::Int), 0..1),
-                (Ok(Token::Dot), 1..2),
-                (Ok(Token::Ident), 2..5)
-            ]
-        );
-        assert_eq!(
-            lex("t.0.1"),
-            [
-                (Ok(Token::Ident), 0..1),
-                (Ok(Token::Dot), 1..2),
-                (Ok(Token::Float), 2..5)
-            ]
-        );
+    #[rstest]
+    #[case::dot("1.", &[(Ok(Token::Int), 0..1), (Ok(Token::Dot), 1..2)])]
+    #[case::range("1..2", &[(Ok(Token::Int), 0..1), (Ok(Token::DotDot), 1..3), (Ok(Token::Int), 3..4)])]
+    #[case::method("1.abs", &[(Ok(Token::Int), 0..1), (Ok(Token::Dot), 1..2), (Ok(Token::Ident), 2..5)])]
+    #[case::tuple_field("t.0.1", &[(Ok(Token::Ident), 0..1), (Ok(Token::Dot), 1..2), (Ok(Token::Float), 2..5)])]
+    fn number_followed_by_dot(
+        #[case] src: &str,
+        #[case] expected: &[(Result<Token, LexError>, Range<usize>)],
+    ) {
+        assert_eq!(lex(src), expected);
     }
 
     #[test]
@@ -587,25 +572,22 @@ mod tests {
         );
     }
 
-    #[test]
-    fn invalid_number_literals() {
-        for (src, error) in [
-            ("1u7", LexError::InvalidNumberSuffix),
-            ("1abc", LexError::InvalidNumberSuffix),
-            ("1.0x", LexError::InvalidNumberSuffix),
-            ("1f16", LexError::InvalidNumberSuffix),
-            ("1e+5abc", LexError::InvalidNumberSuffix),
-            ("2.5E-3u8", LexError::InvalidNumberSuffix),
-            ("0xffg", LexError::InvalidNumberSuffix),
-            ("0b12", LexError::InvalidDigit),
-            ("0o8", LexError::InvalidDigit),
-            ("0x", LexError::MissingDigits),
-            ("0b_", LexError::MissingDigits),
-            ("1e", LexError::MissingExponentDigits),
-            ("1.5E", LexError::MissingExponentDigits),
-        ] {
-            assert_eq!(lex(src), [(Err(error), 0..src.len())], "{src}");
-        }
+    #[rstest]
+    #[case("1u7", LexError::InvalidNumberSuffix)]
+    #[case("1abc", LexError::InvalidNumberSuffix)]
+    #[case("1.0x", LexError::InvalidNumberSuffix)]
+    #[case("1f16", LexError::InvalidNumberSuffix)]
+    #[case("1e+5abc", LexError::InvalidNumberSuffix)]
+    #[case("2.5E-3u8", LexError::InvalidNumberSuffix)]
+    #[case("0xffg", LexError::InvalidNumberSuffix)]
+    #[case("0b12", LexError::InvalidDigit)]
+    #[case("0o8", LexError::InvalidDigit)]
+    #[case("0x", LexError::MissingDigits)]
+    #[case("0b_", LexError::MissingDigits)]
+    #[case("1e", LexError::MissingExponentDigits)]
+    #[case("1.5E", LexError::MissingExponentDigits)]
+    fn invalid_number_literal(#[case] src: &str, #[case] error: LexError) {
+        assert_eq!(lex(src), [(Err(error), 0..src.len())]);
     }
 
     #[test]
