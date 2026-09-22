@@ -217,10 +217,16 @@ mod tests {
     }
 
     #[rstest]
+    #[case("&x", "(& x)")]
+    #[case("&mut x", "(&mut x)")]
+    #[case("& &x", "(& (& x))")]
+    #[case("&(x in 'a'..='z')", "(& (paren (in x (..= Char('a') Char('z')))))")]
     #[case("()", "(tuple)")]
     #[case("(x)", "(paren x)")]
     #[case("(x,)", "(tuple x)")]
     #[case("(x, .., y)", "(tuple x .. y)")]
+    #[case("[]", "(slice)")]
+    #[case("[x, rest in .., y]", "(slice x (in rest ..) y)")]
     #[case("a | b | c", "(| a b c)")]
     #[case("(a | b, c)", "(tuple (| a b) c)")]
     fn compound_pattern(#[case] src: &str, #[case] expected: &str) {
@@ -228,6 +234,9 @@ mod tests {
     }
 
     #[rstest]
+    #[case("&&x")]
+    #[case("&'a'..='z'")]
+    #[case("&x in _")]
     #[case("..=")]
     #[case("'a'..=")]
     #[case("mut")]
@@ -249,5 +258,12 @@ mod tests {
         };
         let spans: Vec<_> = pats.iter().map(|p| p.span.into_range()).collect();
         assert_eq!(spans, [1..2, 4..10]);
+    }
+
+    #[test]
+    fn recovers_inside_delimiters() {
+        let (pat, errors) = parse_pattern("[(a b), c]");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(pat.unwrap().as_sexpr(), "(slice error c)");
     }
 }
