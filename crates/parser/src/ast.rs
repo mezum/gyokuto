@@ -45,6 +45,52 @@ pub enum ExprKind {
     Error,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Type {
+    pub kind: TypeKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeKind {
+    Path(TypePath),
+    /// `!`
+    Never,
+    /// `_`
+    Infer,
+    /// 構文エラーから回復した箇所
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypePath {
+    pub segments: Vec<TypePathSegment>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypePathSegment {
+    pub segment: PathSegment,
+    pub args: Option<GenericArgs>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GenericArgs {
+    /// `<A, B>`
+    Angle(Vec<GenericArg>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GenericArg {
+    Type(Type),
+    /// 関連型の指定 `Item = T`
+    Binding {
+        name: String,
+        ty: Type,
+    },
+    /// const generics の定数
+    Const(Expr),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
     Neg,

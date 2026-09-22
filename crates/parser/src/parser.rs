@@ -7,7 +7,7 @@ use gyokuto_lexer::Token;
 use logos::Logos;
 use std::iter::once;
 
-type Extra = extra::Err<Error>;
+pub(crate) type Extra = extra::Err<Error>;
 
 /// 式を解析する
 pub fn parse_expr(src: &str) -> (Option<Expr>, Vec<Error>) {
@@ -51,7 +51,7 @@ pub(crate) fn input<'tok>(
     tokens.map(eoi, |(token, span)| (token, span))
 }
 
-fn expr<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, Expr, Extra> + Clone
+pub(crate) fn expr<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, Expr, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
@@ -347,12 +347,22 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::error::{ErrorKind, Expected, Found, LiteralError};
     use gyokuto_lexer::LexError;
 
-    fn show(expr: &Expr) -> String {
+    pub(crate) fn show_segment(segment: &PathSegment) -> &str {
+        match segment {
+            PathSegment::Ident(name) => name,
+            PathSegment::Crate => "crate",
+            PathSegment::Super => "super",
+            PathSegment::SelfValue => "self",
+            PathSegment::SelfType => "Self",
+        }
+    }
+
+    pub(crate) fn show(expr: &Expr) -> String {
         let list = |name: &str, exprs: &[&Expr]| {
             let items: String = exprs.iter().map(|e| format!(" {}", show(e))).collect();
             format!("({name}{items})")
@@ -363,13 +373,7 @@ mod tests {
             ExprKind::Path(path) => path
                 .segments
                 .iter()
-                .map(|s| match s {
-                    PathSegment::Ident(name) => name.as_str(),
-                    PathSegment::Crate => "crate",
-                    PathSegment::Super => "super",
-                    PathSegment::SelfValue => "self",
-                    PathSegment::SelfType => "Self",
-                })
+                .map(show_segment)
                 .collect::<Vec<_>>()
                 .join("::"),
             ExprKind::Paren(e) => list("paren", &[e]),
