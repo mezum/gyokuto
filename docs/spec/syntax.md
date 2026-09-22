@@ -44,13 +44,16 @@ LiteralExpr ::= INT | FLOAT | CHAR | STR | RAW_STR | BYTE | BYTE_STR | RAW_BYTE_
 ### パス式
 
 ```ebnf
-PathExpr    ::= PathSegment ( '::' PathSegment )*
-PathSegment ::= IDENT | 'crate' | 'super' | 'self' | 'Self'
+PathExpr        ::= PathExprSegment ( '::' PathExprSegment )*
+PathExprSegment ::= PathSegment ( '::' AngleArgs )?
+PathSegment     ::= IDENT | 'crate' | 'super' | 'self' | 'Self'
 ```
 
 - `crate`・`self`・`Self` は先頭にのみ置ける
 - `super` は先頭から連続する位置にのみ置ける (`super::super::a`)
 - 先頭の `::` は使えない
+- 型引数は `::<` で始める (`Vec::<i32>::new`、`parse::<i32>`)
+  - 式では `<` が比較演算子と紛らわしいため、型と違い `::` を必須とする
 
 ### 括弧式・タプル式
 
@@ -71,6 +74,29 @@ ArrayExpr ::= '[' ( Expr ( ',' Expr )* ','? )? ']'
 
 - `[a; n]` は `a` を `n` 個並べた配列となる
 
+### 後置式
+
+```ebnf
+PostfixExpr ::= PrimaryExpr PostfixOp*
+PostfixOp   ::= '(' CallArgs? ')'
+              | '.' IDENT ( '::' AngleArgs )? '(' CallArgs? ')'
+              | '.' IDENT
+              | '.' TupleIndex
+              | '[' Expr ']'
+              | '?'
+CallArgs    ::= Expr ( ',' Expr )* ','?
+TupleIndex  ::= INT
+```
+
+- `f(a, b)` は関数呼び出し、`a.f(b)` はメソッド呼び出しとなる
+  - `a.f` の後に `(` が続く場合は常にメソッド呼び出しとする。フィールドの値を呼び出す場合は `(a.f)(b)` と書く
+  - メソッドの型引数は `a.f::<T>(b)` と書く
+- `a.name` は名前付きフィールド、`t.0` はタプルのフィールドへのアクセスとなる
+  - タプルのフィールドは `_`・サフィックス・先頭の `0`・`0x` などを含まない 10 進数とする (`t.0` `t.12`)
+  - `t.0.1` は字句としては `t` `.` `0.1` となるため、構文解析で浮動小数点のトークン `0.1` を `0` `.` `1` に分割する
+    - 指数を含むもの (`t.0e1`) やサフィックスを持つものはエラーとする
+- `a[i]` はインデックス、`a?` はエラー伝播となる
+
 ### 演算子式
 
 ```ebnf
@@ -89,16 +115,19 @@ BitXorExpr ::= BitAndExpr ( '^' BitAndExpr )*
 BitAndExpr ::= ShiftExpr ( '&' ShiftExpr )*
 ShiftExpr  ::= AddExpr ( ( '<<' | '>>' ) AddExpr )*
 AddExpr    ::= MulExpr ( ( '+' | '-' ) MulExpr )*
-MulExpr    ::= UnaryExpr ( ( '*' | '/' | '%' ) UnaryExpr )*
+MulExpr    ::= CastExpr ( ( '*' | '/' | '%' ) CastExpr )*
+CastExpr   ::= UnaryExpr ( 'as' TypeNoBounds )*
 UnaryExpr  ::= ( '-' | '!' | '*' | '&' | '&' 'mut' ) UnaryExpr
-             | PrimaryExpr
+             | PostfixExpr
 ```
 
 優先順位と結合性は以下の通り (上ほど強く結合する)。
 
 | 演算子 | 結合性 |
 | --- | --- |
+| 後置 (呼び出し・フィールド・メソッド呼び出し・インデックス・`?`) | - |
 | 単項 `-` `!` `*` `&` `&mut` | - |
+| `as` | 左 |
 | `*` `/` `%` | 左 |
 | `+` `-` | 左 |
 | `<<` `>>` | 左 |
@@ -116,6 +145,8 @@ UnaryExpr  ::= ( '-' | '!' | '*' | '&' | '&' 'mut' ) UnaryExpr
 - 単項 `-` は `-128i8` のようなリテラルにも演算子として適用する
   - 値の範囲の検査は型検査で行うため、`-128i8` は `i8` の最小値として扱える
 - `&&` は 1 トークンの論理積であり、単項 `&` 2 つとしては扱わない
+- `as` の後の型は `+` を含まない型 (TypeNoBounds) とする
+  - 型の後の `<` は常に型引数の開始として扱う。比較する場合は `(x as usize) < y` のように括弧で囲む
 - 範囲式は端点を省略できる (`a..` `..b` `..` `..=b`)
   - `..=` は終端を省略できない
   - `..` の後に式が始まらないトークンが続く場合は、終端を省略したものとする
@@ -143,8 +174,9 @@ TypeBounds   ::= PathType ( '+' PathType )*
 ```ebnf
 PathType        ::= TypePathSegment ( '::' TypePathSegment )*
 TypePathSegment ::= PathSegment GenericArgs?
-GenericArgs     ::= '<' ( GenericArg ( ',' GenericArg )* ','? )? '>'
+GenericArgs     ::= AngleArgs
                   | '(' ( Type ( ',' Type )* ','? )? ')' ( '->' TypeNoBounds )?
+AngleArgs       ::= '<' ( GenericArg ( ',' GenericArg )* ','? )? '>'
 GenericArg      ::= Type | IDENT '=' Type | ConstArg | 'dyn' BlockExpr
 ConstArg        ::= LiteralExpr | '-' LiteralExpr | BlockExpr
 ```
