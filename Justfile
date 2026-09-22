@@ -20,3 +20,6 @@ clean:
 [doc("Format all code")]
 fmt:
     cargo fmt
+
+[doc("Run lint and test for CI")]
+ci: lint test
