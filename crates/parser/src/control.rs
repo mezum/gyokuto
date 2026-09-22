@@ -1,5 +1,6 @@
-use crate::ast::{Expr, ExprKind, Span};
+use crate::ast::{Arm, Expr, ExprKind, Span};
 use crate::parser::{Extra, expr_with};
+use crate::pattern::pattern;
 use crate::stmt::block;
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
@@ -14,6 +15,32 @@ where
 {
     recursive(move |block_like| {
         let cond = expr_with(src, expr.clone(), block_like.clone(), false);
+        let pattern = pattern(src, expr.clone(), block_like.clone());
+        let arm = pattern
+            .then(just(Token::If).ignore_then(expr.clone()).or_not())
+            .then_ignore(just(Token::FatArrow))
+            .then(expr.clone())
+            .map_with(|((pat, guard), body), e| Arm {
+                pat,
+                guard,
+                body,
+                span: e.span(),
+            });
+        let match_expr = just(Token::Match)
+            .ignore_then(cond.clone())
+            .then(
+                arm.separated_by(just(Token::Comma))
+                    .allow_trailing()
+                    .collect()
+                    .delimited_by(just(Token::LBrace), just(Token::RBrace)),
+            )
+            .map_with(|(scrutinee, arms), e| Expr {
+                kind: ExprKind::Match {
+                    scrutinee: Box::new(scrutinee),
+                    arms,
+                },
+                span: e.span(),
+            });
         let block = block(src, expr, block_like);
         let block_expr = block.clone().map_with(|block, e| Expr {
             kind: ExprKind::Block(block),
@@ -69,7 +96,7 @@ where
                     })
             }
         });
-        choice((block_expr, if_expr, loop_expr))
+        choice((block_expr, if_expr, loop_expr, match_expr))
     })
 }
 

@@ -85,11 +85,24 @@ pub enum ExprKind {
         iter: Box<Expr>,
         body: Block,
     },
+    Match {
+        scrutinee: Box<Expr>,
+        arms: Vec<Arm>,
+    },
     Break(Option<Box<Expr>>),
     Continue,
     Return(Option<Box<Expr>>),
     /// 構文エラーから回復した箇所
     Error,
+}
+
+/// `pat if guard => body`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Arm {
+    pub pat: Pat,
+    pub guard: Option<Expr>,
+    pub body: Expr,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]

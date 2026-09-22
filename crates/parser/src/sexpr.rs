@@ -1,8 +1,8 @@
 //! AST を S 式で表す
 
 use crate::ast::{
-    Block, Expr, ExprKind, Field, GenericArg, GenericArgs, Lit, Pat, PatKind, Path, Stmt, StmtKind,
-    Type, TypeKind,
+    Arm, Block, Expr, ExprKind, Field, GenericArg, GenericArgs, Lit, Pat, PatKind, Path, Stmt,
+    StmtKind, Type, TypeKind,
 };
 use std::iter::once;
 
@@ -82,6 +82,9 @@ impl AsSexpr for Expr {
             ExprKind::For { var, iter, body } => {
                 list("for", [var.clone(), iter.as_sexpr(), body.as_sexpr()])
             }
+            ExprKind::Match { scrutinee, arms } => {
+                list("match", once(scrutinee.as_sexpr()).chain(sexprs(arms)))
+            }
             ExprKind::Break(value) => list("break", value.as_ref().map(AsSexpr::as_sexpr)),
             ExprKind::Continue => "(continue)".to_string(),
             ExprKind::Return(value) => list("return", value.as_ref().map(AsSexpr::as_sexpr)),
@@ -128,6 +131,21 @@ fn range(start: &Option<Box<Expr>>, end: &Option<Box<Expr>>, inclusive: bool) ->
     let end_point = |e: &Option<Box<Expr>>| e.as_ref().map_or("_".into(), AsSexpr::as_sexpr);
     let op = if inclusive { "..=" } else { ".." };
     list(op, [end_point(start), end_point(end)])
+}
+
+impl AsSexpr for Arm {
+    fn as_sexpr(&self) -> String {
+        let guard = self
+            .guard
+            .as_ref()
+            .map(|guard| list("if", [guard.as_sexpr()]));
+        list(
+            "=>",
+            once(self.pat.as_sexpr())
+                .chain(guard)
+                .chain(once(self.body.as_sexpr())),
+        )
+    }
 }
 
 impl AsSexpr for Pat {
