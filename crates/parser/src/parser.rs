@@ -1,4 +1,5 @@
 use crate::ast::{Expr, ExprKind, Lit, Path, PathSegment, Span};
+use crate::literal;
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
 use logos::Logos;
@@ -34,10 +35,19 @@ where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
     recursive(|expr| {
-        let lit = select! {
-            Token::True => Lit::Bool(true),
-            Token::False => Lit::Bool(false),
+        let bool_lit = select! {
+            Token::True => ExprKind::Lit(Lit::Bool(true)),
+            Token::False => ExprKind::Lit(Lit::Bool(false)),
         };
+        let lit = one_of([Token::Int, Token::Float]).validate(move |token, e, emitter| {
+            let span: Span = e.span();
+            literal::decode(token, &src[span.into_range()])
+                .map(ExprKind::Lit)
+                .unwrap_or_else(|message| {
+                    emitter.emit(Rich::custom(span, message));
+                    ExprKind::Error
+                })
+        });
 
         let rest_items = just(Token::Comma).ignore_then(
             expr.clone()
@@ -88,7 +98,8 @@ where
             span,
         };
         choice((
-            lit.map(ExprKind::Lit),
+            bool_lit,
+            lit,
             path(src).map(ExprKind::Path),
             parens,
             array,
@@ -158,6 +169,7 @@ mod tests {
         };
         match &expr.kind {
             ExprKind::Lit(Lit::Bool(b)) => b.to_string(),
+            ExprKind::Lit(lit) => format!("{lit:?}"),
             ExprKind::Path(path) => path
                 .segments
                 .iter()
@@ -188,6 +200,22 @@ mod tests {
     fn bool_literals() {
         assert_eq!(parse_ok("true"), "true");
         assert_eq!(parse_ok("false"), "false");
+    }
+
+    #[test]
+    fn literals_in_expressions() {
+        assert_eq!(
+            parse_ok("(1u8, 2.5)"),
+            r#"(tuple Int { value: 1, suffix: Some(U8) } Float { digits: "2.5", suffix: None })"#
+        );
+    }
+
+    #[test]
+    fn too_large_integer_is_error() {
+        let (expr, errors) = parse_expr("[18446744073709551616, a]");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].span().into_range(), 1..21);
+        assert_eq!(show(&expr.unwrap()), "(array error a)");
     }
 
     #[test]

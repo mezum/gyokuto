@@ -1,3 +1,55 @@
+use crate::ast::{FloatSuffix, IntSuffix, Lit};
+use gyokuto_lexer::Token;
+
+const INT_SUFFIXES: [(&str, IntSuffix); 10] = [
+    ("i8", IntSuffix::I8),
+    ("i16", IntSuffix::I16),
+    ("i32", IntSuffix::I32),
+    ("i64", IntSuffix::I64),
+    ("isize", IntSuffix::Isize),
+    ("u8", IntSuffix::U8),
+    ("u16", IntSuffix::U16),
+    ("u32", IntSuffix::U32),
+    ("u64", IntSuffix::U64),
+    ("usize", IntSuffix::Usize),
+];
+
+const FLOAT_SUFFIXES: [(&str, FloatSuffix); 2] =
+    [("f32", FloatSuffix::F32), ("f64", FloatSuffix::F64)];
+
+/// 字句解析で検証済みのリテラルのトークンを値に変換する
+pub(crate) fn decode(token: Token, text: &str) -> Result<Lit, &'static str> {
+    Ok(match token {
+        Token::Int => decode_int(text)?,
+        Token::Float => {
+            let (digits, suffix) = split_suffix(text, &FLOAT_SUFFIXES);
+            Lit::Float {
+                digits: digits.replace('_', ""),
+                suffix,
+            }
+        }
+        _ => unreachable!("リテラルではないトークン: {token:?}"),
+    })
+}
+
+fn decode_int(text: &str) -> Result<Lit, &'static str> {
+    let (digits, suffix) = split_suffix(text, &INT_SUFFIXES);
+    let (radix, digits) = [("0x", 16), ("0o", 8), ("0b", 2)]
+        .into_iter()
+        .find_map(|(prefix, radix)| digits.strip_prefix(prefix).map(|d| (radix, d)))
+        .unwrap_or((10, digits));
+    let value = u64::from_str_radix(&digits.replace('_', ""), radix)
+        .map_err(|_| "integer literal is too large")?;
+    Ok(Lit::Int { value, suffix })
+}
+
+fn split_suffix<'a, S: Copy>(text: &'a str, suffixes: &[(&str, S)]) -> (&'a str, Option<S>) {
+    suffixes
+        .iter()
+        .find_map(|&(name, suffix)| text.strip_suffix(name).map(|rest| (rest, Some(suffix))))
+        .unwrap_or((text, None))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
