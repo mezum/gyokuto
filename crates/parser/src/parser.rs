@@ -215,8 +215,8 @@ mod tests {
     #[test]
     fn literals_in_expressions() {
         assert_eq!(
-            parse_ok("(1u8, 'a')"),
-            "(tuple Int { value: 1, suffix: Some(U8) } Char('a'))"
+            parse_ok(r#"(1u8, 2.5, 'a', "s")"#),
+            r#"(tuple Int { value: 1, suffix: Some(U8) } Float { digits: "2.5", suffix: None } Char('a') Str("s"))"#
         );
     }
 
