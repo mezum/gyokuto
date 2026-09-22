@@ -1,4 +1,5 @@
 use crate::error::LexError;
+use crate::quoted::{Quoted, invalid_quoted};
 use logos::{Lexer, Logos};
 
 /// エラー用パターンの callback の戻り値の型
@@ -41,7 +42,7 @@ pub enum Token {
     /// 閉じていない・不正な内容・直後に識別子の文字が続く文字リテラルはエラーとする
     #[regex(
         r"'([^\\\n]|\\.)?([^'\\\n]|\\.)*'?\p{XID_Continue}*",
-        |_| Fail::Err(LexError::InvalidCharLiteral),
+        |lex| Fail::Err(invalid_quoted(lex.slice(), Quoted::Char)),
         priority = 0
     )]
     Char,
@@ -49,7 +50,7 @@ pub enum Token {
     /// 閉じていない・不正な内容・直後に識別子の文字が続く文字列リテラルはエラーとする
     #[regex(
         r#""([^"\\]|\\(.|\n))*("\p{XID_Continue}*)?"#,
-        |_| Fail::Err(LexError::InvalidStringLiteral),
+        |lex| Fail::Err(invalid_quoted(lex.slice(), Quoted::Str)),
         priority = 0
     )]
     Str,
@@ -57,7 +58,7 @@ pub enum Token {
     /// 閉じていない・不正な内容・直後に識別子の文字が続くバイト文字リテラルはエラーとする
     #[regex(
         r"b'([^\\\n]|\\.)?([^'\\\n]|\\.)*'?\p{XID_Continue}*",
-        |_| Fail::Err(LexError::InvalidByteLiteral),
+        |lex| Fail::Err(invalid_quoted(lex.slice(), Quoted::Byte)),
         priority = 0
     )]
     Byte,
@@ -68,7 +69,7 @@ pub enum Token {
     /// 閉じていない・不正な内容・直後に識別子の文字が続くバイト文字列リテラルはエラーとする
     #[regex(
         r#"b"([^"\\]|\\(.|\n))*("\p{XID_Continue}*)?"#,
-        |_| Fail::Err(LexError::InvalidByteStringLiteral),
+        |lex| Fail::Err(invalid_quoted(lex.slice(), Quoted::ByteStr)),
         priority = 0
     )]
     ByteStr,
