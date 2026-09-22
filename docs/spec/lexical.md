@@ -42,6 +42,7 @@
 - `dyn`
 - `else`
 - `enum`
+- `extern`
 - `false`
 - `fn`
 - `for`
