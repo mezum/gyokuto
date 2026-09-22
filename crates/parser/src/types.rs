@@ -1,6 +1,9 @@
-use crate::ast::{Span, Type, TypeKind};
+use crate::ast::{
+    Expr, ExprKind, GenericArg, GenericArgs, Span, Type, TypeKind, TypePath, TypePathSegment,
+    UnaryOp,
+};
 use crate::error::Error;
-use crate::parser::{Extra, input, lex};
+use crate::parser::{Extra, input, lex, literal, path};
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
 
@@ -15,13 +18,59 @@ pub fn parse_type(src: &str) -> (Option<Type>, Vec<Error>) {
     (ty, errors)
 }
 
-pub(crate) fn ty<'tok, 'src: 'tok, I>(_src: &'src str) -> impl Parser<'tok, I, Type, Extra> + Clone
+pub(crate) fn ty<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, Type, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
-    any().map_with(|_, e| Type {
-        kind: TypeKind::Error,
-        span: e.span(),
+    recursive(|ty| {
+        let lit = literal(src).map_with(|kind, e| Expr {
+            kind,
+            span: e.span(),
+        });
+        let neg_lit = just(Token::Minus)
+            .ignore_then(lit.clone())
+            .map_with(|lit, e| Expr {
+                kind: ExprKind::Unary {
+                    op: UnaryOp::Neg,
+                    expr: Box::new(lit),
+                },
+                span: e.span(),
+            });
+        let binding = just(Token::Ident)
+            .to_span()
+            .then_ignore(just(Token::Eq))
+            .then(ty.clone())
+            .map(move |(name, ty): (Span, _)| GenericArg::Binding {
+                name: src[name.into_range()].to_string(),
+                ty,
+            });
+        let arg = choice((
+            binding,
+            lit.or(neg_lit).map(GenericArg::Const),
+            ty.clone().map(GenericArg::Type),
+        ));
+        let args = arg
+            .separated_by(just(Token::Comma))
+            .allow_trailing()
+            .collect()
+            .delimited_by(just(Token::Lt), just(Token::Gt))
+            .map(GenericArgs::Angle);
+        let type_path = path(src, args.or_not()).map(|segments| TypePath {
+            segments: segments
+                .into_iter()
+                .map(|(segment, args)| TypePathSegment { segment, args })
+                .collect(),
+        });
+
+        choice((
+            type_path.map(TypeKind::Path),
+            just(Token::Bang).to(TypeKind::Never),
+            just(Token::Underscore).to(TypeKind::Infer),
+        ))
+        .map_with(|kind, e| Type {
+            kind,
+            span: e.span(),
+        })
     })
 }
 
