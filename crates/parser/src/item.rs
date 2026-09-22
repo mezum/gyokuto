@@ -286,6 +286,22 @@ mod tests {
         assert!(!parse_module(src).1.is_empty());
     }
 
+    #[rstest]
+    #[case(
+        "fn f() { + } fn g() {}",
+        "(fn f (params) (block error)) (fn g (params) (block))"
+    )]
+    #[case(
+        "extern fn f(x); extern fn g();",
+        "(extern fn f (params)) (extern fn g (params))"
+    )]
+    fn recovers_inside_delimiters(#[case] src: &str, #[case] expected: &str) {
+        let (items, errors) = parse_module(src);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let items: Vec<_> = items.unwrap().iter().map(AsSexpr::as_sexpr).collect();
+        assert_eq!(items.join(" "), expected);
+    }
+
     #[test]
     fn item_spans() {
         let items = parse_module("fn f() {}  fn g() {}").0.unwrap();
