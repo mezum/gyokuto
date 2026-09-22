@@ -196,4 +196,50 @@ mod tests {
     fn invalid_loop(#[case] src: &str) {
         assert!(!parse_expr(src).1.is_empty());
     }
+
+    #[rstest]
+    #[case("match x {}", "(match x)")]
+    #[case("match x { _ => a }", "(match x (=> _ a))")]
+    #[case(
+        "match x { Some(y) => y, None => z, }",
+        "(match x (=> (Some y) y) (=> None z))"
+    )]
+    #[case(
+        "match x { y if y > a => b, _ => c }",
+        "(match x (=> y (if (Gt y a)) b) (=> _ c))"
+    )]
+    #[case(
+        "match x { A | B => {}, _ => { a } }",
+        "(match x (=> (| A B) (block)) (=> _ (block a)))"
+    )]
+    #[case(
+        "match x { _ => if a { b } else { c }, }",
+        "(match x (=> _ (if a (block b) (block c))))"
+    )]
+    #[case("match a + b { _ => c }", "(match (Add a b) (=> _ c))")]
+    #[case("match ({ a }) { _ => b }", "(match (paren (block a)) (=> _ b))")]
+    fn match_expr(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("{ match x { _ => a } b }", "(block (expr (match x (=> _ a))) b)")]
+    #[case("{ match x { _ => a } }", "(block (match x (=> _ a)))")]
+    #[case("a + match x { _ => b }", "(Add a (match x (=> _ b)))")]
+    fn match_in_expr_and_stmt(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("match x")]
+    #[case("match { a } { _ => b }")]
+    #[case("match x { _ }")]
+    #[case("match x { _ => a b }")]
+    #[case("match x { _ => {} _ => b }")]
+    #[case("match x { _ => a,, }")]
+    #[case("match x { if a => b }")]
+    #[case("{ match x { _ => a }; }")]
+    fn invalid_match(#[case] src: &str) {
+        assert!(!parse_expr(src).1.is_empty());
+    }
 }
