@@ -396,6 +396,7 @@ mod tests {
     #[case("dyn", Token::Dyn)]
     #[case("else", Token::Else)]
     #[case("enum", Token::Enum)]
+    #[case("extern", Token::Extern)]
     #[case("false", Token::False)]
     #[case("fn", Token::Fn)]
     #[case("for", Token::For)]
