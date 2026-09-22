@@ -6,7 +6,9 @@
 
 - [ ] crate 構成 (ライブラリ + 動作確認用 CLI)
 - [x] 字句解析
+- [ ] CI (`just ci` で lint とテストを実行する GitHub Actions の workflow)
 - [ ] 構文解析・AST
+- [ ] 仕様書の語彙の統一
 - [ ] エラー表示 (ariadne / miette)
 - [ ] 名前解決・モジュール (`use` / `pub`、ホストによるソース解決)
 - [ ] 型検査・局所型推論
