@@ -13,6 +13,9 @@ use logos::{Lexer, Logos};
 #[logos(subpattern esc = r#"\\([nrt\\0'"]|x[0-7][0-9a-fA-F]|u\{_*([0-9a-fA-F]_*){1,6}\})"#)]
 #[logos(subpattern byte_esc = r#"\\([nrt\\0'"]|x[0-9a-fA-F]{2})"#)]
 pub enum Token {
+    /// 字句解析のエラー。構文解析の入力でエラーの位置を表すために使う
+    Error,
+
     #[regex(r"[\p{XID_Start}_]\p{XID_Continue}*")]
     Ident,
     #[token("_", priority = 3)]
