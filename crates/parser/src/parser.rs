@@ -21,6 +21,9 @@ pub fn parse_expr(src: &str) -> (Option<Expr>, Vec<Error>) {
 }
 
 /// 字句解析し、エラーのトークンを `Token::Error` に置き換えたトークン列と字句解析のエラーを得る
+///
+/// 型引数を閉じる `>` を取り出せるように、`>` で始まるトークンは 1 文字ずつに分割する。
+/// 演算子としては、隙間なく並んだ分割後のトークンを [`glued`] で 1 つにまとめて解析する。
 pub(crate) fn lex(src: &str) -> (Vec<(Token, Span)>, Vec<Error>) {
     let lexed: Vec<_> = Token::lexer(src)
         .spanned()
@@ -28,7 +31,19 @@ pub(crate) fn lex(src: &str) -> (Vec<(Token, Span)>, Vec<Error>) {
         .collect();
     let tokens: Vec<(Token, Span)> = lexed
         .iter()
-        .map(|&(token, span)| (token.unwrap_or(Token::Error), span))
+        .flat_map(|&(token, span)| {
+            let parts = match token {
+                Ok(Token::Shr) => vec![Token::Gt, Token::Gt],
+                Ok(Token::Ge) => vec![Token::Gt, Token::Eq],
+                Ok(Token::ShrEq) => vec![Token::Gt, Token::Gt, Token::Eq],
+                _ => return vec![(token.unwrap_or(Token::Error), span)],
+            };
+            parts
+                .into_iter()
+                .enumerate()
+                .map(move |(i, part)| (part, Span::from(span.start + i..span.start + i + 1)))
+                .collect()
+        })
         .collect();
     let errors = lexed
         .iter()
@@ -178,8 +193,8 @@ where
                 left(8),
                 select! {
                     Token::Shl => BinaryOp::Shl,
-                    Token::Shr => BinaryOp::Shr,
-                },
+                }
+                .or(glued(&[Token::Gt, Token::Gt]).to(BinaryOp::Shr)),
             ),
             binary(left(7), just(Token::Amp).to(BinaryOp::BitAnd)),
             binary(left(6), just(Token::Caret).to(BinaryOp::BitXor)),
@@ -190,10 +205,10 @@ where
                     Token::EqEq => BinaryOp::Eq,
                     Token::Ne => BinaryOp::Ne,
                     Token::Lt => BinaryOp::Lt,
-                    Token::Gt => BinaryOp::Gt,
                     Token::Le => BinaryOp::Le,
-                    Token::Ge => BinaryOp::Ge,
-                },
+                }
+                .or(glued(&[Token::Gt]).to(BinaryOp::Gt))
+                .or(glued(&[Token::Gt, Token::Eq]).to(BinaryOp::Ge)),
             ),
             binary(left(3), just(Token::AndAnd).to(BinaryOp::And)),
             binary(left(2), just(Token::OrOr).to(BinaryOp::Or)),
@@ -238,8 +253,8 @@ where
             Token::PipeEq => Some(BinaryOp::BitOr),
             Token::CaretEq => Some(BinaryOp::BitXor),
             Token::ShlEq => Some(BinaryOp::Shl),
-            Token::ShrEq => Some(BinaryOp::Shr),
-        };
+        }
+        .or(glued(&[Token::Gt, Token::Gt, Token::Eq]).to(Some(BinaryOp::Shr)));
         range
             .then(assign_op.then(expr).or_not())
             .map_with(|(place, assign), e| match assign {
@@ -254,6 +269,29 @@ where
                 },
             })
     })
+}
+
+/// 分割された `>` で始まるトークンが、隙間なく `tokens` の通りに並んでいるものを 1 つの演算子として解析する
+fn glued<'tok, I>(tokens: &'static [Token]) -> impl Parser<'tok, I, (), Extra> + Clone
+where
+    I: ValueInput<'tok, Token = Token, Span = Span>,
+{
+    let spanned = any().map_with(|token, e| (token, e.span()));
+    spanned
+        .repeated()
+        .exactly(tokens.len())
+        .collect::<Vec<(Token, Span)>>()
+        .then(spanned.rewind().or_not())
+        .filter(move |(parts, next)| {
+            let joined = |a: &Span, b: &Span| a.end == b.start;
+            parts.iter().map(|(token, _)| token).eq(tokens)
+                && parts.windows(2).all(|w| joined(&w[0].1, &w[1].1))
+                && !matches!(
+                    (parts.last(), next),
+                    (Some((_, last)), Some((Token::Gt | Token::Eq, span))) if joined(last, span)
+                )
+        })
+        .ignored()
 }
 
 fn binary<'tok, I>(
