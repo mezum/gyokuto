@@ -5,11 +5,19 @@ on:
     branches: [main]
   pull_request:
 
+permissions: {}
+
 jobs:
   ci:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - run: rustup toolchain install
       - uses: actions/cache@v6
         with:
@@ -22,4 +30,42 @@ jobs:
       - uses: taiki-e/install-action@dfae9bf3d6f6c6f20ef4ebb3486c01a51341ff12 # v2.87.18
         with:
           tool: just
-      - run: just ci
+      - run: just ci 2>&1 | tee ci.log
+        shell: bash
+      - name: テスト時間を Job Summary に書く
+        run: |
+          perl .github/scripts/test-times.pl ci.log > test-times.md
+          { echo '## テスト時間'; cat test-times.md; } >> "$GITHUB_STEP_SUMMARY"
+      - id: upload
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-times
+          path: test-times.md
+          retention-days: 1
+
+  comment:
+    needs: ci
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      pull-requests: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: test-times
+      - name: テスト時間の概要をまとめる
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          { echo '## テスト時間'; head -1 test-times.md; echo; echo "詳細: $RUN_URL"; } > comment.md
+      - uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          header: test-times
+          path: comment.md
+      - name: artifact を削除する
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ needs.ci.outputs.artifact-id }}
+        run: gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID"
