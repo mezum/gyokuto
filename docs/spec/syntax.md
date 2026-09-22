@@ -24,7 +24,8 @@
 
 ```ebnf
 Expr        ::= AssignExpr | BreakExpr | ContinueExpr | ReturnExpr
-PrimaryExpr ::= LiteralExpr | PathExpr | ParenExpr | TupleExpr | ArrayExpr | BlockLikeExpr
+PrimaryExpr ::= LiteralExpr | PathExpr | ParenExpr | TupleExpr | ArrayExpr | StructExpr
+              | BlockLikeExpr
 ```
 
 ### リテラル式
@@ -74,6 +75,21 @@ ArrayExpr ::= '[' ( Expr ( ',' Expr )* ','? )? ']'
 
 - `[a; n]` は `a` を `n` 個並べた配列となる
 
+### 構造体式
+
+```ebnf
+StructExpr ::= PathExpr '{' ( StructBase | FieldInit ( ',' FieldInit )* ( ',' StructBase? )? )? '}'
+FieldInit  ::= IDENT ':' Expr | IDENT
+StructBase ::= '..' Expr
+```
+
+- 構造体・構造体のバリアントの値を作る (`Point { x: 1, y }`、`Shape::Circle { r: 1.0 }`)
+  - `x` は `x: x` の省略とする
+- `..base` は、明示しなかったフィールドを `base` の値で埋める
+  - `..base` の後には `,` もフィールドも書けない
+- タプル構造体の値は関数呼び出し (`Pair(1, 2)`)、ユニット構造体の値はパス式 (`Unit`) で作る
+- フィールドが揃っているかは型検査で検査する
+
 ### ブロック式
 
 ```ebnf
@@ -102,9 +118,10 @@ ContinueExpr ::= 'continue'
 ReturnExpr   ::= 'return' Expr?
 ```
 
-- 条件式 (CondExpr) では、括弧 `()` `[]` の外にブロック様の式を書けない
+- 条件式 (CondExpr) では、括弧 `()` `[]` の外にブロック様の式と構造体式を書けない
   - 条件式の後の `{` は常に本体の開始とする。`for i in 0.. { ... }` は終端を省略した範囲となる
   - ブロック様の式を使う場合は `if ({ a }) { ... }` のように括弧で囲む
+  - 構造体式も同じく `if a == (S { x }) { ... }` のように括弧で囲む
 - `if` の値は実行した分岐のブロックの値とする
   - `else` が無い場合、値は `()` となる
   - 各分岐の値の型が一致するかは型検査で検査する
@@ -238,7 +255,7 @@ BlockLikeExpr ::= BlockExpr | IfExpr | LoopExpr | WhileExpr | ForExpr | MatchExp
 
 ```ebnf
 Module        ::= Item*
-Item          ::= FnItem | ExternItem
+Item          ::= FnItem | StructItem | EnumItem | ExternItem
 FnItem        ::= FnSig BlockExpr
 ExternItem    ::= 'extern' FnSig ';'
                 | 'extern' StructItem
@@ -252,6 +269,14 @@ GenericParam  ::= IDENT ( ':' TypeBounds )?
                 | 'const' IDENT ':' Type
 WhereClause   ::= 'where' ( WherePred ( ',' WherePred )* ','? )?
 WherePred     ::= Type ':' TypeBounds
+StructItem    ::= 'struct' IDENT GenericParams? WhereClause? '{' Fields? '}'
+                | 'struct' IDENT GenericParams? '(' TupleFields? ')' WhereClause? ';'
+                | 'struct' IDENT GenericParams? WhereClause? ';'
+EnumItem      ::= 'enum' IDENT GenericParams? WhereClause? '{' ( Variant ( ',' Variant )* ','? )? '}'
+Variant       ::= IDENT ( '{' Fields? '}' | '(' TupleFields? ')' | '=' Expr )?
+Fields        ::= Field ( ',' Field )* ','?
+Field         ::= IDENT ':' Type
+TupleFields   ::= Type ( ',' Type )* ','?
 ```
 
 - 1 つのファイルを 1 つのモジュール (Module) とし、項目を並べる
@@ -266,9 +291,15 @@ WherePred     ::= Type ':' TypeBounds
   - 定数引数の型は数値に限らない (`const S: &str`)
   - 型引数の既定値は持たない
 - `where` は境界をジェネリクスの引数の外に書く (`where T: A + B, Vec<T>: C`)
+- 構造体は名前付きのフィールド (`struct P { x: i32 }`)、タプル構造体 (`struct P(i32);`)、ユニット構造体 (`struct P;`) とする
+  - フィールドの公開 (`pub`) は可視性の仕様で定める
+- enum のバリアントは、フィールドを持たないもの・タプル・名前付きのフィールドを持つものとする
+  - フィールドを持たないバリアントには判別子の値を書ける (`A = 1`)
+  - 判別子の値が定数として評価できるか、フィールドを持つバリアントと混在していないかは型検査で検査する
 - `extern` はホストが登録する関数・型を宣言する
   - 関数は本体の代わりに `;` を置く (`extern fn log(msg: &str);`)
-  - 型は構造体の定義に `extern` を前置する (`extern struct Foo { ... }`)。StructItem は構造体の仕様で定める
+  - 型は構造体の定義に `extern` を前置する (`extern struct Foo { ... }`)
+    - `extern struct Foo;` は中身を公開しないホスト型とする
   - 宣言とホストが登録したものが一致するかは、ホストとの連携時に検査する
 
 ## パターン
