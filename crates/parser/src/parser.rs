@@ -385,62 +385,15 @@ where
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
     use crate::error::{ErrorKind, Expected, Found, LiteralError};
     use gyokuto_lexer::LexError;
 
-    pub(crate) fn show_segment(segment: &PathSegment) -> &str {
-        match segment {
-            PathSegment::Ident(name) => name,
-            PathSegment::Crate => "crate",
-            PathSegment::Super => "super",
-            PathSegment::SelfValue => "self",
-            PathSegment::SelfType => "Self",
-        }
-    }
-
-    pub(crate) fn show(expr: &Expr) -> String {
-        let list = |name: &str, exprs: &[&Expr]| {
-            let items: String = exprs.iter().map(|e| format!(" {}", show(e))).collect();
-            format!("({name}{items})")
-        };
-        match &expr.kind {
-            ExprKind::Lit(Lit::Bool(b)) => b.to_string(),
-            ExprKind::Lit(lit) => format!("{lit:?}"),
-            ExprKind::Path(path) => path
-                .segments
-                .iter()
-                .map(show_segment)
-                .collect::<Vec<_>>()
-                .join("::"),
-            ExprKind::Paren(e) => list("paren", &[e]),
-            ExprKind::Tuple(es) => list("tuple", &es.iter().collect::<Vec<_>>()),
-            ExprKind::Array(es) => list("array", &es.iter().collect::<Vec<_>>()),
-            ExprKind::Repeat { elem, len } => list("repeat", &[elem, len]),
-            ExprKind::Unary { op, expr } => list(&format!("{op:?}"), &[expr]),
-            ExprKind::Binary { op, lhs, rhs } => list(&format!("{op:?}"), &[lhs, rhs]),
-            ExprKind::Range {
-                start,
-                end,
-                inclusive,
-            } => {
-                let end_point = |e: &Option<Box<Expr>>| e.as_deref().map_or("_".to_string(), show);
-                let op = if *inclusive { "..=" } else { ".." };
-                format!("({op} {} {})", end_point(start), end_point(end))
-            }
-            ExprKind::Assign { op, place, value } => {
-                let op = op.map_or(String::new(), |op| format!("{op:?}"));
-                list(&format!("{op}="), &[place, value])
-            }
-            ExprKind::Error => "error".to_string(),
-        }
-    }
-
     fn parse_ok(src: &str) -> String {
         let (expr, errors) = parse_expr(src);
         assert!(errors.is_empty(), "{src}: {errors:?}");
-        show(&expr.unwrap())
+        expr.unwrap().to_string()
     }
 
     #[test]
@@ -473,7 +426,7 @@ pub(crate) mod tests {
             errors[0].kind,
             ErrorKind::Literal(LiteralError::IntegerTooLarge)
         );
-        assert_eq!(show(&expr.unwrap()), "(array error a)");
+        assert_eq!(expr.unwrap().to_string(), "(array error a)");
     }
 
     #[test]
@@ -518,7 +471,7 @@ pub(crate) mod tests {
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert_eq!(errors[0].span.into_range(), 0..1);
         assert_eq!(errors[0].kind, ErrorKind::Lex(LexError::UnexpectedChar));
-        assert_eq!(show(&expr.unwrap()), "error");
+        assert_eq!(expr.unwrap().to_string(), "error");
     }
 
     #[test]
@@ -579,14 +532,14 @@ pub(crate) mod tests {
             ),
             "{errors:?}"
         );
-        assert_eq!(show(&expr.unwrap()), "(array error c)");
+        assert_eq!(expr.unwrap().to_string(), "(array error c)");
     }
 
     #[test]
     fn lexical_error_inside_delimiters() {
         let (expr, errors) = parse_expr("[a, $]");
         assert_eq!(errors.len(), 1, "{errors:?}");
-        assert_eq!(show(&expr.unwrap()), "(array a error)");
+        assert_eq!(expr.unwrap().to_string(), "(array a error)");
     }
 
     #[test]

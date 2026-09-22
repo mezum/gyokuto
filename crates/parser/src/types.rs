@@ -188,79 +188,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{GenericArg, GenericArgs, TypePath};
-    use crate::parser::tests::{show, show_segment};
-
-    fn show_type(ty: &Type) -> String {
-        let list = |name: &str, types: &[&Type]| {
-            let items: String = types.iter().map(|t| format!(" {}", show_type(t))).collect();
-            format!("({name}{items})")
-        };
-        match &ty.kind {
-            TypeKind::Path(path) => show_path(path),
-            TypeKind::Ref { mutable, ty } => list(if *mutable { "&mut" } else { "&" }, &[ty]),
-            TypeKind::Paren(t) => list("paren", &[t]),
-            TypeKind::Tuple(ts) => list("tuple", &ts.iter().collect::<Vec<_>>()),
-            TypeKind::Array { elem, len } => format!("(array {} {})", show_type(elem), show(len)),
-            TypeKind::Slice(t) => list("slice", &[t]),
-            TypeKind::Fn { params, ret } => {
-                let ret = ret
-                    .as_ref()
-                    .map_or(String::new(), |t| format!(" {}", show_type(t)));
-                let params: Vec<_> = params.iter().map(show_type).collect();
-                format!("(fn ({}){ret})", params.join(" "))
-            }
-            TypeKind::Dyn(bounds) => show_bounds("dyn", bounds),
-            TypeKind::Impl(bounds) => show_bounds("impl", bounds),
-            TypeKind::Never => "!".to_string(),
-            TypeKind::Infer => "_".to_string(),
-            TypeKind::Error => "error".to_string(),
-        }
-    }
-
-    fn show_path(path: &TypePath) -> String {
-        path.segments
-            .iter()
-            .map(|s| {
-                let args = s.args.as_ref().map_or(String::new(), |args| match args {
-                    GenericArgs::Angle(args) => {
-                        let args: Vec<_> = args.iter().map(show_arg).collect();
-                        format!("<{}>", args.join(", "))
-                    }
-                    GenericArgs::Paren { inputs, output } => {
-                        let inputs: Vec<_> = inputs.iter().map(show_type).collect();
-                        let output = output
-                            .as_ref()
-                            .map_or(String::new(), |t| format!(" -> {}", show_type(t)));
-                        format!("({}){output}", inputs.join(", "))
-                    }
-                });
-                format!("{}{args}", show_segment(&s.segment))
-            })
-            .collect::<Vec<_>>()
-            .join("::")
-    }
-
-    fn show_bounds(name: &str, bounds: &[TypePath]) -> String {
-        let bounds: String = bounds
-            .iter()
-            .map(|b| format!(" {}", show_path(b)))
-            .collect();
-        format!("({name}{bounds})")
-    }
-
-    fn show_arg(arg: &GenericArg) -> String {
-        match arg {
-            GenericArg::Type(ty) => show_type(ty),
-            GenericArg::Binding { name, ty } => format!("{name} = {}", show_type(ty)),
-            GenericArg::Const(expr) => show(expr),
-        }
-    }
 
     fn parse_ok(src: &str) -> String {
         let (ty, errors) = parse_type(src);
         assert!(errors.is_empty(), "{src}: {errors:?}");
-        show_type(&ty.unwrap())
+        ty.unwrap().to_string()
     }
 
     #[test]
@@ -401,6 +333,6 @@ mod tests {
     fn recovers_inside_delimiters() {
         let (ty, errors) = parse_type("(A, [B C])");
         assert_eq!(errors.len(), 1, "{errors:?}");
-        assert_eq!(show_type(&ty.unwrap()), "(tuple A error)");
+        assert_eq!(ty.unwrap().to_string(), "(tuple A error)");
     }
 }
