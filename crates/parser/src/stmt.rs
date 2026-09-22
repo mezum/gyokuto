@@ -39,9 +39,13 @@ where
         let stmt = choice((
             let_stmt,
             block_like.map(StmtKind::Expr),
-            expr.clone()
-                .then_ignore(just(Token::Semi))
-                .map(StmtKind::Semi),
+            expr.then(choice((
+                just(Token::Semi).to(StmtKind::Semi as fn(Expr) -> StmtKind),
+                just(Token::RBrace)
+                    .rewind()
+                    .to(StmtKind::Expr as fn(Expr) -> StmtKind),
+            )))
+            .map(|(expr, kind)| kind(expr)),
         ))
         .map_with(|kind, e| Stmt {
             kind,
@@ -49,10 +53,9 @@ where
         });
         stmt.repeated()
             .collect::<Vec<_>>()
-            .then(expr.or_not())
             .delimited_by(just(Token::LBrace), just(Token::RBrace))
-            .map(|(mut stmts, expr)| {
-                let expr = expr.or_else(|| match stmts.pop() {
+            .map(|mut stmts| {
+                let expr = match stmts.pop() {
                     Some(Stmt {
                         kind: StmtKind::Expr(expr),
                         ..
@@ -61,7 +64,7 @@ where
                         stmts.extend(last);
                         None
                     }
-                });
+                };
                 Block {
                     stmts,
                     expr: expr.map(Box::new),
@@ -145,6 +148,12 @@ mod tests {
         let (expr, errors) = parse_expr("[{ a b }, c]");
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert_eq!(expr.unwrap().as_sexpr(), "(array error c)");
+    }
+
+    #[test]
+    fn deeply_nested_tail_blocks() {
+        let src = format!("{}a{}", "{ (".repeat(32), ") }".repeat(32));
+        assert!(parse_expr(&src).1.is_empty());
     }
 
     #[test]
