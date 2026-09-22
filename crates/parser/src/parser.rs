@@ -695,6 +695,111 @@ mod tests {
     }
 
     #[test]
+    fn call_without_args() {
+        assert_eq!(parse_ok("f()"), "(call f)");
+    }
+
+    #[test]
+    fn call_with_args() {
+        assert_eq!(parse_ok("f(a, b,)"), "(call f a b)");
+    }
+
+    #[test]
+    fn chained_calls() {
+        assert_eq!(parse_ok("f(a)(b)"), "(call (call f a) b)");
+    }
+
+    #[test]
+    fn method_call_without_args() {
+        assert_eq!(parse_ok("a.f()"), "(method a f)");
+    }
+
+    #[test]
+    fn method_call_with_args() {
+        assert_eq!(parse_ok("a.f(b, c)"), "(method a f b c)");
+    }
+
+    #[test]
+    fn named_field() {
+        assert_eq!(parse_ok("a.b"), "(field a b)");
+    }
+
+    #[test]
+    fn chained_fields() {
+        assert_eq!(parse_ok("a.b.c"), "(field (field a b) c)");
+    }
+
+    #[test]
+    fn index() {
+        assert_eq!(parse_ok("a[i]"), "(index a i)");
+    }
+
+    #[test]
+    fn chained_index() {
+        assert_eq!(parse_ok("a[i][j]"), "(index (index a i) j)");
+    }
+
+    #[test]
+    fn try_operator() {
+        assert_eq!(parse_ok("a?"), "(? a)");
+    }
+
+    #[test]
+    fn try_after_method_call() {
+        assert_eq!(parse_ok("a.f()?"), "(? (method a f))");
+    }
+
+    #[test]
+    fn calling_field_needs_parens() {
+        assert_eq!(parse_ok("(a.f)(b)"), "(call (paren (field a f)) b)");
+    }
+
+    #[test]
+    fn postfix_binds_tighter_than_neg() {
+        assert_eq!(parse_ok("-a.b"), "(Neg (field a b))");
+    }
+
+    #[test]
+    fn postfix_binds_tighter_than_deref() {
+        assert_eq!(parse_ok("*a?"), "(Deref (? a))");
+    }
+
+    #[test]
+    fn postfix_in_binary() {
+        assert_eq!(parse_ok("a.b + c[d]"), "(Add (field a b) (index c d))");
+    }
+
+    #[test]
+    fn call_args_need_commas() {
+        assert!(!parse_expr("f(a b)").1.is_empty());
+    }
+
+    #[test]
+    fn field_needs_name() {
+        assert!(!parse_expr("a.").1.is_empty());
+    }
+
+    #[test]
+    fn index_needs_expr() {
+        assert!(!parse_expr("a[]").1.is_empty());
+    }
+
+    #[test]
+    fn index_takes_one_expr() {
+        assert!(!parse_expr("a[i, j]").1.is_empty());
+    }
+
+    #[test]
+    fn postfix_spans() {
+        let expr = parse_expr("a.b(c)").0.unwrap();
+        let ExprKind::MethodCall { receiver, .. } = &expr.kind else {
+            panic!("{expr:?}");
+        };
+        assert_eq!(expr.span.into_range(), 0..6);
+        assert_eq!(receiver.span.into_range(), 0..1);
+    }
+
+    #[test]
     fn trailing_tokens_are_error() {
         assert!(!parse_expr("a b").1.is_empty());
     }

@@ -1,7 +1,10 @@
 //! AST を S 式で表示する
 
-use crate::ast::{Expr, ExprKind, GenericArg, GenericArgs, Lit, Path, Type, TypeKind, TypePath};
+use crate::ast::{
+    Expr, ExprKind, Field, GenericArg, GenericArgs, Lit, Path, Type, TypeKind, TypePath,
+};
 use std::fmt::{self, Display, Formatter};
+use std::iter::once;
 
 fn list(f: &mut Formatter, name: &str, items: &[&dyn Display]) -> fmt::Result {
     write!(f, "({name}")?;
@@ -38,6 +41,26 @@ impl Display for Expr {
             ExprKind::Tuple(es) => list(f, "tuple", &displays(es)),
             ExprKind::Array(es) => list(f, "array", &displays(es)),
             ExprKind::Repeat { elem, len } => list(f, "repeat", &[elem, len]),
+            ExprKind::Call { callee, args } => {
+                let items: Vec<&dyn Display> = once(callee as &dyn Display)
+                    .chain(args.iter().map(|a| a as &dyn Display))
+                    .collect();
+                list(f, "call", &items)
+            }
+            ExprKind::MethodCall {
+                receiver,
+                method,
+                args,
+            } => {
+                let items: Vec<&dyn Display> = [receiver as &dyn Display, method]
+                    .into_iter()
+                    .chain(args.iter().map(|a| a as &dyn Display))
+                    .collect();
+                list(f, "method", &items)
+            }
+            ExprKind::Field { expr, field } => list(f, "field", &[expr, field]),
+            ExprKind::Index { expr, index } => list(f, "index", &[expr, index]),
+            ExprKind::Try(expr) => list(f, "?", &[expr]),
             ExprKind::Unary { op, expr } => list(f, &format!("{op:?}"), &[expr]),
             ExprKind::Binary { op, lhs, rhs } => list(f, &format!("{op:?}"), &[lhs, rhs]),
             ExprKind::Range {
@@ -55,6 +78,14 @@ impl Display for Expr {
                 list(f, &format!("{op}="), &[place, value])
             }
             ExprKind::Error => write!(f, "error"),
+        }
+    }
+}
+
+impl Display for Field {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            Field::Named(name) => write!(f, "{name}"),
         }
     }
 }

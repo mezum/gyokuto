@@ -20,6 +20,25 @@ pub enum ExprKind {
         elem: Box<Expr>,
         len: Box<Expr>,
     },
+    Call {
+        callee: Box<Expr>,
+        args: Vec<Expr>,
+    },
+    MethodCall {
+        receiver: Box<Expr>,
+        method: String,
+        args: Vec<Expr>,
+    },
+    Field {
+        expr: Box<Expr>,
+        field: Field,
+    },
+    Index {
+        expr: Box<Expr>,
+        index: Box<Expr>,
+    },
+    /// `expr?`
+    Try(Box<Expr>),
     Unary {
         op: UnaryOp,
         expr: Box<Expr>,
@@ -43,6 +62,11 @@ pub enum ExprKind {
     },
     /// 構文エラーから回復した箇所
     Error,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Field {
+    Named(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
