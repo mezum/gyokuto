@@ -1,6 +1,9 @@
 //! AST を S 式で表す
 
-use crate::ast::{Expr, ExprKind, Field, GenericArg, GenericArgs, Lit, Path, Type, TypeKind};
+use crate::ast::{
+    Block, Expr, ExprKind, Field, GenericArg, GenericArgs, Lit, Path, Stmt, StmtKind, Type,
+    TypeKind,
+};
 use std::iter::once;
 
 /// AST を S 式の文字列にする
@@ -68,7 +71,42 @@ impl AsSexpr for Expr {
                 let op = op.map_or(String::new(), |op| format!("{op:?}"));
                 list(&format!("{op}="), sexprs([place, value]))
             }
+            ExprKind::Block(block) => block.as_sexpr(),
             ExprKind::Error => "error".to_string(),
+        }
+    }
+}
+
+impl AsSexpr for Block {
+    fn as_sexpr(&self) -> String {
+        list(
+            "block",
+            sexprs(&self.stmts)
+                .into_iter()
+                .chain(self.expr.as_ref().map(AsSexpr::as_sexpr)),
+        )
+    }
+}
+
+impl AsSexpr for Stmt {
+    fn as_sexpr(&self) -> String {
+        match &self.kind {
+            StmtKind::Let {
+                mutable,
+                name,
+                ty,
+                init,
+            } => list(
+                "let",
+                mutable
+                    .then(|| "mut".to_string())
+                    .into_iter()
+                    .chain(once(name.clone()))
+                    .chain(ty.as_ref().map(|ty| list(":", [ty.as_sexpr()])))
+                    .chain(init.as_ref().map(|init| list("=", [init.as_sexpr()]))),
+            ),
+            StmtKind::Semi(expr) => list("semi", [expr.as_sexpr()]),
+            StmtKind::Expr(expr) => list("expr", [expr.as_sexpr()]),
         }
     }
 }

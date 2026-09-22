@@ -67,8 +67,36 @@ pub enum ExprKind {
         place: Box<Expr>,
         value: Box<Expr>,
     },
+    Block(Block),
     /// 構文エラーから回復した箇所
     Error,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Block {
+    pub stmts: Vec<Stmt>,
+    /// 末尾の `;` を付けない式。ブロックの値となる
+    pub expr: Option<Box<Expr>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Stmt {
+    pub kind: StmtKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StmtKind {
+    Let {
+        mutable: bool,
+        name: String,
+        ty: Option<Type>,
+        init: Option<Expr>,
+    },
+    /// `expr;`
+    Semi(Expr),
+    /// `;` を付けないブロック様の式
+    Expr(Expr),
 }
 
 #[derive(Debug, Clone, PartialEq)]

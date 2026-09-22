@@ -3,6 +3,7 @@ use crate::ast::{
 };
 use crate::error::{Error, ErrorKind};
 use crate::literal;
+use crate::stmt::block;
 use crate::types::{angle_args, ty, ty_no_bounds};
 use chumsky::pratt::{Associativity, Operator, infix, left, none, postfix, prefix};
 use chumsky::{input::ValueInput, prelude::*};
@@ -128,6 +129,7 @@ where
             path(src, turbofish.clone().or_not()).map(ExprKind::Path),
             parens,
             array,
+            block(src, expr.clone()).map(ExprKind::Block),
             just(Token::Error).to(ExprKind::Error),
         ))
         .map_with(|kind, e| Expr {
@@ -149,6 +151,15 @@ where
             [
                 (Token::LParen, Token::RParen),
                 (Token::LBrace, Token::RBrace),
+            ],
+            error,
+        )))
+        .recover_with(via_parser(nested_delimiters(
+            Token::LBrace,
+            Token::RBrace,
+            [
+                (Token::LParen, Token::RParen),
+                (Token::LBracket, Token::RBracket),
             ],
             error,
         )));
