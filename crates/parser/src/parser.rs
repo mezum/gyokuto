@@ -221,6 +221,13 @@ mod tests {
     }
 
     #[test]
+    fn multi_scalar_graphemes_are_not_chars() {
+        for src in ["'e\u{301}'", "'👨\u{200D}👩'", "'🇯🇵'"] {
+            assert!(!parse_expr(src).1.is_empty(), "{src:?}");
+        }
+    }
+
+    #[test]
     fn too_large_integer_is_error() {
         let (expr, errors) = parse_expr("[18446744073709551616, a]");
         assert_eq!(errors.len(), 1, "{errors:?}");

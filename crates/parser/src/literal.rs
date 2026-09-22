@@ -196,6 +196,42 @@ mod tests {
     }
 
     #[test]
+    fn ligatures_and_rtl_chars() {
+        assert_eq!(lit("'ﬁ'"), Ok(Lit::Char('ﬁ')));
+        assert_eq!(lit("'ﷺ'"), Ok(Lit::Char('ﷺ')));
+        assert_eq!(lit("'م'"), Ok(Lit::Char('م')));
+        assert_eq!(lit("'א'"), Ok(Lit::Char('א')));
+        assert_eq!(lit("'\u{200F}'"), Ok(Lit::Char('\u{200F}')));
+        assert_eq!(lit(r"'\u{202E}'"), Ok(Lit::Char('\u{202E}')));
+    }
+
+    #[test]
+    fn ligatures_and_rtl_strings() {
+        for text in [
+            "ﬁle ﬂow",
+            "مرحبا بالعالم",
+            "שלום עולם",
+            "abc مرحبا 123",
+            "a\u{200F}b\u{200E}c",
+            "\u{202E}abc\u{202C}",
+            "e\u{301}",
+            "👨\u{200D}👩\u{200D}👧",
+            "🇯🇵",
+        ] {
+            assert_eq!(lit(&format!("\"{text}\"")), str(text), "{text:?}");
+            assert_eq!(lit(&format!("r\"{text}\"")), str(text), "{text:?}");
+            let expected = Ok(Lit::ByteStr(text.as_bytes().to_vec()));
+            assert_eq!(lit(&format!("b\"{text}\"")), expected, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn line_continuation_skips_directional_marks() {
+        assert_eq!(lit("\"a\\\n\u{200F}\u{200E} b\""), str("ab"));
+        assert_eq!(lit("\"a\\\n\u{202E}b\""), str("a\u{202E}b"));
+    }
+
+    #[test]
     fn strings() {
         assert_eq!(lit(r#""a\tb""#), str("a\tb"));
         assert_eq!(lit(r#""\u{3042}""#), str("あ"));
