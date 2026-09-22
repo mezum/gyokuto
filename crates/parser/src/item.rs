@@ -250,6 +250,30 @@ mod tests {
         assert!(!parse_module(src).1.is_empty());
     }
 
+    #[rstest]
+    #[case("extern fn f();", "(extern fn f (params))")]
+    #[case("extern fn log(msg: &str);", "(extern fn log (params (: msg (& str))))")]
+    #[case(
+        "extern fn f<T>(x: T) -> T where T: A;",
+        "(extern fn f (generics T) (params (: x T)) (-> T) (where (: T A)))"
+    )]
+    #[case(
+        "extern fn f(); fn g() {}",
+        "(extern fn f (params)) (fn g (params) (block))"
+    )]
+    fn extern_fn(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("extern fn f() {}")]
+    #[case("extern fn f()")]
+    #[case("extern f();")]
+    #[case("extern;")]
+    fn invalid_extern_fn(#[case] src: &str) {
+        assert!(!parse_module(src).1.is_empty());
+    }
+
     #[test]
     fn item_spans() {
         let items = parse_module("fn f() {}  fn g() {}").0.unwrap();

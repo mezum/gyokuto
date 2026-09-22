@@ -175,6 +175,25 @@ mod tests {
     }
 
     #[rstest]
+    #[case("{ fn f() {} }", "(block (fn f (params) (block)))")]
+    #[case("{ fn f() {} f() }", "(block (fn f (params) (block)) (call f))")]
+    #[case("{ extern fn f(); }", "(block (extern fn f (params)))")]
+    #[case(
+        "{ fn f() { fn g() {} } }",
+        "(block (fn f (params) (block (fn g (params) (block)))))"
+    )]
+    fn item_stmt(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("{ fn f() {}; }")]
+    #[case("{ a fn f() {} }")]
+    fn invalid_item_stmt(#[case] src: &str) {
+        assert!(!parse_expr(src).1.is_empty());
+    }
+
+    #[rstest]
     #[case("a + { b }", "(Add a (block b))")]
     #[case("({ a } - b)", "(paren (Sub (block a) b))")]
     #[case("{{ a }}", "(block (block a))")]
