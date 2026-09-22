@@ -145,7 +145,7 @@ PathType        ::= TypePathSegment ( '::' TypePathSegment )*
 TypePathSegment ::= PathSegment GenericArgs?
 GenericArgs     ::= '<' ( GenericArg ( ',' GenericArg )* ','? )? '>'
                   | '(' ( Type ( ',' Type )* ','? )? ')' ( '->' TypeNoBounds )?
-GenericArg      ::= Type | IDENT '=' Type | ConstArg
+GenericArg      ::= Type | IDENT '=' Type | ConstArg | 'dyn' BlockExpr
 ConstArg        ::= LiteralExpr | '-' LiteralExpr | BlockExpr
 ```
 
@@ -153,7 +153,9 @@ ConstArg        ::= LiteralExpr | '-' LiteralExpr | BlockExpr
 - 型引数には型・関連型の指定 (`Iterator<Item = T>`)・定数 (const generics) を書ける
   - 定数はリテラル・負のリテラル・ブロック式 (`Buffer<{ N * 2 }>`) とする
   - `Buffer<N>` の `N` は構文上は型として解析し、型か定数かは名前解決で決める
-  - `dyn` のトレイトの型引数に限り、ブロック式に実行時にしか決まらない式や `Type` 値を書ける (`dyn Store<{ t }>`)
+- `dyn` のトレイトの型引数に限り、`dyn` を前置したブロック式で実行時に決まる値や型を書ける (`dyn Store<dyn { t }>`)
+  - 型引数の `dyn` の後が `{` であるかで、`dyn Trait` と区別する
+  - `dyn` のトレイト以外の型引数に書いた場合は型検査でエラーとする
 - `Fn(A, B) -> C` のような括弧の型引数は、クロージャのトレイト `Fn` / `FnMut` / `FnOnce` に使う
 - 型引数を閉じる位置にある `>>` `>=` `>>=` は、先頭の `>` を閉じ括弧とし、残りを次のトークンとして扱う
   - `Vec<Vec<T>>` は `>` 2 つとして解析する
