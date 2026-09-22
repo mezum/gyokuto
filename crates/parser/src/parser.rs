@@ -284,6 +284,19 @@ mod tests {
             ExprKind::Repeat { elem, len } => list("repeat", &[elem, len]),
             ExprKind::Unary { op, expr } => list(&format!("{op:?}"), &[expr]),
             ExprKind::Binary { op, lhs, rhs } => list(&format!("{op:?}"), &[lhs, rhs]),
+            ExprKind::Range {
+                start,
+                end,
+                inclusive,
+            } => {
+                let end_point = |e: &Option<Box<Expr>>| e.as_deref().map_or("_".to_string(), show);
+                let op = if *inclusive { "..=" } else { ".." };
+                format!("({op} {} {})", end_point(start), end_point(end))
+            }
+            ExprKind::Assign { op, place, value } => {
+                let op = op.map_or(String::new(), |op| format!("{op:?}"));
+                list(&format!("{op}="), &[place, value])
+            }
             ExprKind::Error => "error".to_string(),
         }
     }
@@ -527,6 +540,57 @@ mod tests {
             panic!("{expr:?}");
         };
         assert_eq!(rhs.span.into_range(), 4..6);
+    }
+
+    #[test]
+    fn ranges() {
+        for (src, expected) in [
+            ("a..b", "(.. a b)"),
+            ("a..", "(.. a _)"),
+            ("..b", "(.. _ b)"),
+            ("..", "(.. _ _)"),
+            ("a..=b", "(..= a b)"),
+            ("..=b", "(..= _ b)"),
+            ("a || b..c && d", "(.. (Or a b) (And c d))"),
+            ("(a..)", "(paren (.. a _))"),
+            ("[.., a..]", "(array (.. _ _) (.. a _))"),
+        ] {
+            assert_eq!(parse_ok(src), expected, "{src}");
+        }
+    }
+
+    #[test]
+    fn invalid_ranges() {
+        for src in ["a..=", "..=", "a..b..c", "..a..", "(a..=)"] {
+            assert!(!parse_expr(src).1.is_empty(), "{src}");
+        }
+    }
+
+    #[test]
+    fn assignments() {
+        for (src, op) in [
+            ("a = b", ""),
+            ("a += b", "Add"),
+            ("a -= b", "Sub"),
+            ("a *= b", "Mul"),
+            ("a /= b", "Div"),
+            ("a %= b", "Rem"),
+            ("a &= b", "BitAnd"),
+            ("a |= b", "BitOr"),
+            ("a ^= b", "BitXor"),
+            ("a <<= b", "Shl"),
+            ("a >>= b", "Shr"),
+        ] {
+            assert_eq!(parse_ok(src), format!("({op}= a b)"), "{src}");
+        }
+    }
+
+    #[test]
+    fn assignment_is_right_associative_and_weakest() {
+        assert_eq!(parse_ok("a = b = c"), "(= a (= b c))");
+        assert_eq!(parse_ok("a = b..c"), "(= a (.. b c))");
+        assert_eq!(parse_ok("a += b || c"), "(Add= a (Or b c))");
+        assert_eq!(parse_ok("*a = -b"), "(= (Deref a) (Neg b))");
     }
 
     #[test]

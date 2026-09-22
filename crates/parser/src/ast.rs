@@ -29,6 +29,18 @@ pub enum ExprKind {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
+    /// `start..end` / `start..=end`。端点は省略できる
+    Range {
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+        inclusive: bool,
+    },
+    /// `place = value`。複合代入では `op` に演算を持つ
+    Assign {
+        op: Option<BinaryOp>,
+        place: Box<Expr>,
+        value: Box<Expr>,
+    },
     /// 構文エラーから回復した箇所
     Error,
 }
