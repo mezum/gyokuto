@@ -145,6 +145,52 @@ mod tests {
     }
 
     #[rstest]
+    #[case("fn f<>() {}", "(fn f (params) (block))")]
+    #[case("fn f<T>() {}", "(fn f (generics T) (params) (block))")]
+    #[case("fn f<T: A>() {}", "(fn f (generics (: T A)) (params) (block))")]
+    #[case(
+        "fn f<T: A + B<C>, U,>() {}",
+        "(fn f (generics (: T A B<C>) U) (params) (block))"
+    )]
+    #[case(
+        "fn f<const N: usize>() {}",
+        "(fn f (generics (const N usize)) (params) (block))"
+    )]
+    #[case(
+        "fn f<const S: &str, T>() {}",
+        "(fn f (generics (const S (& str)) T) (params) (block))"
+    )]
+    fn fn_generics(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("fn f() where {}", "(fn f (params) (block))")]
+    #[case("fn f() where T: A {}", "(fn f (params) (where (: T A)) (block))")]
+    #[case(
+        "fn f() -> T where T: A + B, Vec<T>: C, {}",
+        "(fn f (params) (-> T) (where (: T A B) (: Vec<T> C)) (block))"
+    )]
+    #[case(
+        "fn f() where F: Fn(A) -> B {}",
+        "(fn f (params) (where (: F Fn(A) -> B)) (block))"
+    )]
+    fn fn_where(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("fn f<T:>() {}")]
+    #[case("fn f<const N>() {}")]
+    #[case("fn f<1>() {}")]
+    #[case("fn f<T() {}")]
+    #[case("fn f() where T {}")]
+    #[case("fn f() where T: {}")]
+    fn invalid_generics(#[case] src: &str) {
+        assert!(!parse_module(src).1.is_empty());
+    }
+
+    #[rstest]
     #[case("fn f()")]
     #[case("fn f();")]
     #[case("fn () {}")]
