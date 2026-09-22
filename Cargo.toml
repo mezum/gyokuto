@@ -11,4 +11,5 @@ license = "MIT OR APACHE-2.0"
 [workspace.dependencies]
 chumsky = "0.13.0"
 logos = "0.16.1"
+thiserror = "2.0.20"
 unicode-ident = "1.0.26"
