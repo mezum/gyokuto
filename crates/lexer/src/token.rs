@@ -270,7 +270,6 @@ fn block_comment(lex: &mut Lexer<Token>) -> Result<(), ()> {
         match remainder.get(i..i + 2) {
             Some(b"/*") => (depth, i) = (depth + 1, i + 2),
             Some(b"*/") => (depth, i) = (depth - 1, i + 2),
-            // 2 文字目が `/` か `*` なら、次の 2 文字が `/*` か `*/` になり得るので 1 文字だけ進める
             Some([_, b'/' | b'*']) => i += 1,
             Some(_) => i += 2,
             None => {
