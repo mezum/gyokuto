@@ -378,4 +378,39 @@ mod tests {
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert_eq!(ty.unwrap().as_sexpr(), "(tuple A error)");
     }
+
+    #[rstest]
+    #[case("Buffer<{ N * M }>", "Buffer<(block (Mul N M))>")]
+    #[case("Buffer<{ N }, T>", "Buffer<(block N), T>")]
+    #[case("Vec<Buffer<{ N }>>", "Vec<Buffer<(block N)>>")]
+    #[case("Buffer<{ let n = N; n }>", "Buffer<(block (let n (= N)) n)>")]
+    fn block_const_arg(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("dyn Store<dyn { t }>", "(dyn Store<(dyn (block t))>)")]
+    #[case("dyn Store<dyn { t }, T>", "(dyn Store<(dyn (block t)), T>)")]
+    #[case("dyn Store<dyn A>", "(dyn Store<(dyn A)>)")]
+    fn runtime_arg(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[test]
+    fn block_const_arg_in_turbofish() {
+        let (expr, errors) = crate::parse_expr("f::<{ N }>()");
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(expr.unwrap().as_sexpr(), "(call f<(block N)>)");
+    }
+
+    #[rstest]
+    #[case("Buffer<{ N } + M>")]
+    #[case("Buffer<{ N }.m>")]
+    #[case("Buffer<{ N } > M>")]
+    #[case("Store<dyn { t } + A>")]
+    #[case("Store<dyn ({ t })>")]
+    #[case("Buffer<{ N }")]
+    fn invalid_block_arg(#[case] src: &str) {
+        assert!(!parse_type(src).1.is_empty());
+    }
 }
