@@ -3,9 +3,10 @@ use crate::ast::{
     UnaryOp,
 };
 use crate::error::Error;
-use crate::parser::{Extra, input, lex, literal, path};
+use crate::parser::{Extra, expr, input, lex, literal, path};
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
+use std::iter::once;
 
 /// 型を解析する
 pub fn parse_type(src: &str) -> (Option<Type>, Vec<Error>) {
@@ -62,8 +63,52 @@ where
                 .collect(),
         });
 
+        let reference = just(Token::Amp)
+            .ignore_then(just(Token::Mut).or_not())
+            .then(ty.clone())
+            .map(|(mutable, ty)| TypeKind::Ref {
+                mutable: mutable.is_some(),
+                ty: Box::new(ty),
+            });
+
+        let rest_items = just(Token::Comma).ignore_then(
+            ty.clone()
+                .separated_by(just(Token::Comma))
+                .allow_trailing()
+                .collect::<Vec<_>>(),
+        );
+        let parens = ty
+            .clone()
+            .then(rest_items.or_not())
+            .or_not()
+            .delimited_by(just(Token::LParen), just(Token::RParen))
+            .map(|inner| match inner {
+                None => TypeKind::Tuple(Vec::new()),
+                Some((first, None)) => TypeKind::Paren(Box::new(first)),
+                Some((first, Some(rest))) => TypeKind::Tuple(once(first).chain(rest).collect()),
+            });
+
+        let array = ty
+            .clone()
+            .then(just(Token::Semi).ignore_then(expr(src)).or_not())
+            .delimited_by(just(Token::LBracket), just(Token::RBracket))
+            .map(|(elem, len)| match len {
+                None => TypeKind::Slice(Box::new(elem)),
+                Some(len) => TypeKind::Array {
+                    elem: Box::new(elem),
+                    len: Box::new(len),
+                },
+            });
+
+        let error = |span| Type {
+            kind: TypeKind::Error,
+            span,
+        };
         choice((
             type_path.map(TypeKind::Path),
+            reference,
+            parens,
+            array,
             just(Token::Bang).to(TypeKind::Never),
             just(Token::Underscore).to(TypeKind::Infer),
         ))
@@ -71,6 +116,24 @@ where
             kind,
             span: e.span(),
         })
+        .recover_with(via_parser(nested_delimiters(
+            Token::LParen,
+            Token::RParen,
+            [
+                (Token::LBracket, Token::RBracket),
+                (Token::LBrace, Token::RBrace),
+            ],
+            error,
+        )))
+        .recover_with(via_parser(nested_delimiters(
+            Token::LBracket,
+            Token::RBracket,
+            [
+                (Token::LParen, Token::RParen),
+                (Token::LBrace, Token::RBrace),
+            ],
+            error,
+        )))
     })
 }
 
