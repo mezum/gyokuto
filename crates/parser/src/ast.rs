@@ -68,6 +68,26 @@ pub enum ExprKind {
         value: Box<Expr>,
     },
     Block(Block),
+    /// `if cond { .. } else ..`。`otherwise` はブロックか `if` の式
+    If {
+        cond: Box<Expr>,
+        then: Block,
+        otherwise: Option<Box<Expr>>,
+    },
+    Loop(Block),
+    While {
+        cond: Box<Expr>,
+        body: Block,
+    },
+    /// `for var in iter { .. }`
+    For {
+        var: String,
+        iter: Box<Expr>,
+        body: Block,
+    },
+    Break(Option<Box<Expr>>),
+    Continue,
+    Return(Option<Box<Expr>>),
     /// 構文エラーから回復した箇所
     Error,
 }
