@@ -1,8 +1,8 @@
 //! AST を S 式で表す
 
 use crate::ast::{
-    Block, Expr, ExprKind, Field, GenericArg, GenericArgs, Lit, Pat, PatKind, Path, Stmt, StmtKind,
-    Type, TypeKind,
+    Arm, Block, Expr, ExprKind, Field, GenericArg, GenericArgs, Lit, Pat, PatKind, Path, Stmt,
+    StmtKind, Type, TypeKind,
 };
 use std::iter::once;
 
@@ -79,8 +79,12 @@ impl AsSexpr for Expr {
             ),
             ExprKind::Loop(body) => list("loop", [body.as_sexpr()]),
             ExprKind::While { cond, body } => list("while", [cond.as_sexpr(), body.as_sexpr()]),
-            ExprKind::For { var, iter, body } => {
-                list("for", [var.clone(), iter.as_sexpr(), body.as_sexpr()])
+            ExprKind::For { pat, iter, body } => {
+                list("for", [pat.as_sexpr(), iter.as_sexpr(), body.as_sexpr()])
+            }
+            ExprKind::Let { pat, expr } => list("let", [pat.as_sexpr(), expr.as_sexpr()]),
+            ExprKind::Match { scrutinee, arms } => {
+                list("match", once(scrutinee.as_sexpr()).chain(sexprs(arms)))
             }
             ExprKind::Break(value) => list("break", value.as_ref().map(AsSexpr::as_sexpr)),
             ExprKind::Continue => "(continue)".to_string(),
@@ -105,18 +109,20 @@ impl AsSexpr for Stmt {
     fn as_sexpr(&self) -> String {
         match &self.kind {
             StmtKind::Let {
-                mutable,
-                name,
+                pat,
                 ty,
                 init,
+                otherwise,
             } => list(
                 "let",
-                mutable
-                    .then(|| "mut".to_string())
-                    .into_iter()
-                    .chain(once(name.clone()))
+                once(pat.as_sexpr())
                     .chain(ty.as_ref().map(|ty| list(":", [ty.as_sexpr()])))
-                    .chain(init.as_ref().map(|init| list("=", [init.as_sexpr()]))),
+                    .chain(init.as_ref().map(|init| list("=", [init.as_sexpr()])))
+                    .chain(
+                        otherwise
+                            .as_ref()
+                            .map(|block| list("else", [block.as_sexpr()])),
+                    ),
             ),
             StmtKind::Semi(expr) => list("semi", [expr.as_sexpr()]),
             StmtKind::Expr(expr) => list("expr", [expr.as_sexpr()]),
@@ -128,6 +134,21 @@ fn range(start: &Option<Box<Expr>>, end: &Option<Box<Expr>>, inclusive: bool) ->
     let end_point = |e: &Option<Box<Expr>>| e.as_ref().map_or("_".into(), AsSexpr::as_sexpr);
     let op = if inclusive { "..=" } else { ".." };
     list(op, [end_point(start), end_point(end)])
+}
+
+impl AsSexpr for Arm {
+    fn as_sexpr(&self) -> String {
+        let guard = self
+            .guard
+            .as_ref()
+            .map(|guard| list("if", [guard.as_sexpr()]));
+        list(
+            "=>",
+            once(self.pat.as_sexpr())
+                .chain(guard)
+                .chain(once(self.body.as_sexpr())),
+        )
+    }
 }
 
 impl AsSexpr for Pat {
@@ -152,10 +173,22 @@ impl AsSexpr for Pat {
                 end,
                 inclusive,
             } => range(start, end, *inclusive),
+            PatKind::Ref { mutable, pat } => {
+                list(if *mutable { "&mut" } else { "&" }, [pat.as_sexpr()])
+            }
             PatKind::Paren(pat) => list("paren", [pat.as_sexpr()]),
             PatKind::Tuple(pats) => list("tuple", sexprs(pats)),
+            PatKind::Slice(pats) => list("slice", sexprs(pats)),
             PatKind::Path(path) => path.as_sexpr(),
+            PatKind::TupleStruct { path, elems } => list(&path.as_sexpr(), sexprs(elems)),
+            PatKind::Struct { path, fields, rest } => list(
+                "struct",
+                once(path.as_sexpr())
+                    .chain(fields.iter().map(|f| list(&f.name, [f.pat.as_sexpr()])))
+                    .chain(rest.then(|| "..".to_string())),
+            ),
             PatKind::Or(pats) => list("|", sexprs(pats)),
+            PatKind::Error => "error".to_string(),
         }
     }
 }

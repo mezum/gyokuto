@@ -1,36 +1,52 @@
-use crate::ast::{Block, Expr, Span, Stmt, StmtKind};
+use crate::ast::{Block, Expr, Pat, Span, Stmt, StmtKind};
+use crate::control::has_bare_block_like;
+use crate::error::{Error, ErrorKind};
 use crate::parser::Extra;
 use crate::types::ty;
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
 
-/// ブロック `{ ... }` を解析する。文の先頭のブロック様の式には `block_like` を使う
+/// ブロック `{ ... }` を解析する。文の先頭のブロック様の式には `block_like`、`let` の左辺には `pattern` を使う
 pub(crate) fn block<'tok, 'src: 'tok, I>(
     src: &'src str,
     expr: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
     block_like: impl Parser<'tok, I, Expr, Extra> + Clone + 'tok,
+    pattern: impl Parser<'tok, I, Pat, Extra> + Clone + 'tok,
 ) -> impl Parser<'tok, I, Block, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
-    let name = just(Token::Ident)
-        .to_span()
-        .map(move |span: Span| src[span.into_range()].to_string());
+    let otherwise =
+        just(Token::Else).ignore_then(just(Token::LBrace).rewind().ignore_then(block_like.clone()));
+    let init = just(Token::Eq)
+        .ignore_then(expr.clone())
+        .then(otherwise.or_not())
+        .validate(|(init, otherwise), _, emitter| {
+            if otherwise.is_some() && has_bare_block_like(&init) {
+                emitter.emit(Error {
+                    span: init.span,
+                    kind: ErrorKind::BlockLikeBeforeElse,
+                });
+            }
+            (init, otherwise)
+        });
     let let_stmt = just(Token::Let)
-        .ignore_then(just(Token::Mut).or_not().map(|m| m.is_some()))
-        .then(name)
+        .ignore_then(pattern)
         .then(
             just(Token::Colon)
                 .ignore_then(ty(src, expr.clone(), block_like.clone()))
                 .or_not(),
         )
-        .then(just(Token::Eq).ignore_then(expr.clone()).or_not())
+        .then(init.or_not())
         .then_ignore(just(Token::Semi))
-        .map(|(((mutable, name), ty), init)| StmtKind::Let {
-            mutable,
-            name,
-            ty,
-            init,
+        .map(|((pat, ty), init)| {
+            let (init, otherwise) = init.unzip();
+            StmtKind::Let {
+                pat,
+                ty,
+                init,
+                otherwise: otherwise.flatten().map(Box::new),
+            }
         });
     let stmt = choice((
         let_stmt,
@@ -93,16 +109,59 @@ mod tests {
 
     #[rstest]
     #[case("{ let x; }", "(block (let x))")]
-    #[case("{ let mut x; }", "(block (let mut x))")]
+    #[case("{ let mut x; }", "(block (let (mut x)))")]
     #[case("{ let x: T; }", "(block (let x (: T)))")]
     #[case("{ let x = a; }", "(block (let x (= a)))")]
     #[case(
         "{ let mut x: Vec<T> = a + b; }",
-        "(block (let mut x (: Vec<T>) (= (Add a b))))"
+        "(block (let (mut x) (: Vec<T>) (= (Add a b))))"
     )]
     #[case("{ let x = a; x }", "(block (let x (= a)) x)")]
     fn let_stmt(#[case] src: &str, #[case] expected: &str) {
         assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("{ let (a, b) = c; }", "(block (let (tuple a b) (= c)))")]
+    #[case("{ let A(x) | B(x) = a; }", "(block (let (| (A x) (B x)) (= a)))")]
+    #[case("{ let x in Some(_) = a; }", "(block (let (in x (Some _)) (= a)))")]
+    #[case("{ let x = a + { b }; }", "(block (let x (= (Add a (block b)))))")]
+    fn let_pattern(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case(
+        "{ let Some(x) = a else { return }; }",
+        "(block (let (Some x) (= a) (else (block (return)))))"
+    )]
+    #[case(
+        "{ let x: T = a.b() else { return }; }",
+        "(block (let x (: T) (= (method a b)) (else (block (return)))))"
+    )]
+    #[case(
+        "{ let Some(x) = (if a { b } else { c }) else { return }; }",
+        "(block (let (Some x) (= (paren (if a (block b) (block c)))) (else (block (return)))))"
+    )]
+    #[case(
+        "{ let Some(x) = f({ a }) else { return }; }",
+        "(block (let (Some x) (= (call f (block a))) (else (block (return)))))"
+    )]
+    fn let_else(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("{ let Some(x) = if a { b } else { c } else { return }; }")]
+    #[case("{ let x = { a } else { return }; }")]
+    #[case("{ let x = a + { b } else { return }; }")]
+    #[case("{ let x = -loop {} else { return }; }")]
+    #[case("{ let x = { a }.b else { return }; }")]
+    #[case("{ let x else { return }; }")]
+    #[case("{ let x = a else b; }")]
+    #[case("{ let x = a else { return } }")]
+    fn invalid_let_else(#[case] src: &str) {
+        assert!(!parse_expr(src).1.is_empty());
     }
 
     #[rstest]
@@ -130,7 +189,6 @@ mod tests {
     #[case("{ a b }")]
     #[case("{ let x }")]
     #[case("{ let x = a }")]
-    #[case("{ let 1; }")]
     #[case("{ let x: = a; }")]
     #[case("{ let mut; }")]
     #[case("{ a")]

@@ -79,17 +79,35 @@ pub enum ExprKind {
         cond: Box<Expr>,
         body: Block,
     },
-    /// `for var in iter { .. }`
+    /// `for pat in iter { .. }`
     For {
-        var: String,
+        pat: Box<Pat>,
         iter: Box<Expr>,
         body: Block,
+    },
+    /// 条件式の `let pat = expr`
+    Let {
+        pat: Box<Pat>,
+        expr: Box<Expr>,
+    },
+    Match {
+        scrutinee: Box<Expr>,
+        arms: Vec<Arm>,
     },
     Break(Option<Box<Expr>>),
     Continue,
     Return(Option<Box<Expr>>),
     /// 構文エラーから回復した箇所
     Error,
+}
+
+/// `pat if guard => body`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Arm {
+    pub pat: Pat,
+    pub guard: Option<Expr>,
+    pub body: Expr,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -108,10 +126,11 @@ pub struct Stmt {
 #[derive(Debug, Clone, PartialEq)]
 pub enum StmtKind {
     Let {
-        mutable: bool,
-        name: String,
+        pat: Pat,
         ty: Option<Type>,
         init: Option<Expr>,
+        /// `let .. else { .. }` のブロック式
+        otherwise: Option<Box<Expr>>,
     },
     /// `expr;`
     Semi(Expr),
@@ -152,11 +171,37 @@ pub enum PatKind {
         end: Option<Box<Expr>>,
         inclusive: bool,
     },
+    Ref {
+        mutable: bool,
+        pat: Box<Pat>,
+    },
     Paren(Box<Pat>),
     Tuple(Vec<Pat>),
+    Slice(Vec<Pat>),
     Path(Path),
+    /// `P(a, b)`
+    TupleStruct {
+        path: Path,
+        elems: Vec<Pat>,
+    },
+    /// `P { a, b: c, .. }`。`rest` は `..` の有無
+    Struct {
+        path: Path,
+        fields: Vec<FieldPat>,
+        rest: bool,
+    },
     /// `a | b`
     Or(Vec<Pat>),
+    /// 構文エラーから回復した箇所
+    Error,
+}
+
+/// 構造体のパターンのフィールド。`x` は `x: x` として保持する
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldPat {
+    pub name: String,
+    pub pat: Pat,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]

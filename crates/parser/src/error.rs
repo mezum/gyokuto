@@ -21,6 +21,10 @@ pub enum ErrorKind {
     Literal(#[from] LiteralError),
     #[error("invalid tuple index")]
     InvalidTupleIndex,
+    #[error("block-like expression before `else` must be parenthesized")]
+    BlockLikeBeforeElse,
+    #[error("`let` is only allowed as an operand of `&&` in `if` / `while` conditions")]
+    MisplacedLet,
     #[error("unexpected {found:?}, expected one of {expected:?}")]
     Syntax {
         expected: Vec<Expected>,

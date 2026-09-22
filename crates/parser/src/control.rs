@@ -1,5 +1,7 @@
-use crate::ast::{Expr, ExprKind, Span};
+use crate::ast::{Arm, BinaryOp, Expr, ExprKind, Span};
+use crate::error::{Error, ErrorKind};
 use crate::parser::{Extra, expr_with};
+use crate::pattern::{no_top_in, pattern};
 use crate::stmt::block;
 use chumsky::{input::ValueInput, prelude::*};
 use gyokuto_lexer::Token;
@@ -14,32 +16,70 @@ where
 {
     recursive(move |block_like| {
         let cond = expr_with(src, expr.clone(), block_like.clone(), false);
-        let block = block(src, expr, block_like);
+        let check_lets = |allowed: bool| {
+            cond.clone().validate(move |cond: Expr, _, emitter| {
+                for span in misplaced_lets(&cond, allowed) {
+                    emitter.emit(Error {
+                        span,
+                        kind: ErrorKind::MisplacedLet,
+                    });
+                }
+                cond
+            })
+        };
+        let let_cond = check_lets(true);
+        let cond = check_lets(false);
+        let pattern = pattern(src, expr.clone(), block_like.clone());
+        let arm = pattern
+            .clone()
+            .then(just(Token::If).ignore_then(expr.clone()).or_not())
+            .then_ignore(just(Token::FatArrow))
+            .then(expr.clone())
+            .map_with(|((pat, guard), body), e| Arm {
+                pat,
+                guard,
+                body,
+                span: e.span(),
+            });
+        let match_expr = just(Token::Match)
+            .ignore_then(cond.clone())
+            .then(
+                arm.separated_by(just(Token::Comma))
+                    .allow_trailing()
+                    .collect()
+                    .delimited_by(just(Token::LBrace), just(Token::RBrace)),
+            )
+            .map_with(|(scrutinee, arms), e| Expr {
+                kind: ExprKind::Match {
+                    scrutinee: Box::new(scrutinee),
+                    arms,
+                },
+                span: e.span(),
+            });
+        let for_pattern = no_top_in(src, expr.clone(), block_like.clone(), pattern.clone());
+        let block = block(src, expr, block_like, pattern);
         let block_expr = block.clone().map_with(|block, e| Expr {
             kind: ExprKind::Block(block),
             span: e.span(),
         });
-        let name = just(Token::Ident)
-            .to_span()
-            .map(move |span: Span| src[span.into_range()].to_string());
         let loop_expr = choice((
             just(Token::Loop)
                 .ignore_then(block.clone())
                 .map(ExprKind::Loop),
             just(Token::While)
-                .ignore_then(cond.clone())
+                .ignore_then(let_cond.clone())
                 .then(block.clone())
                 .map(|(cond, body)| ExprKind::While {
                     cond: Box::new(cond),
                     body,
                 }),
             just(Token::For)
-                .ignore_then(name)
+                .ignore_then(for_pattern)
                 .then_ignore(just(Token::In))
                 .then(cond.clone())
                 .then(block.clone())
-                .map(|((var, iter), body)| ExprKind::For {
-                    var,
+                .map(|((pat, iter), body)| ExprKind::For {
+                    pat: Box::new(pat),
                     iter: Box::new(iter),
                     body,
                 }),
@@ -52,7 +92,7 @@ where
             let block_expr = block_expr.clone();
             move |if_expr| {
                 just(Token::If)
-                    .ignore_then(cond)
+                    .ignore_then(let_cond)
                     .then(block)
                     .then(
                         just(Token::Else)
@@ -69,8 +109,79 @@ where
                     })
             }
         });
-        choice((block_expr, if_expr, loop_expr))
+        choice((block_expr, if_expr, loop_expr, match_expr))
     })
+}
+
+/// 括弧の外にある直下の式
+fn bare_operands(expr: &Expr) -> Vec<&Expr> {
+    match &expr.kind {
+        ExprKind::Call { callee: expr, .. }
+        | ExprKind::MethodCall { receiver: expr, .. }
+        | ExprKind::Field { expr, .. }
+        | ExprKind::Index { expr, .. }
+        | ExprKind::Try(expr)
+        | ExprKind::Cast { expr, .. }
+        | ExprKind::Unary { expr, .. }
+        | ExprKind::Let { expr, .. } => vec![expr],
+        ExprKind::Binary { lhs, rhs, .. }
+        | ExprKind::Assign {
+            place: lhs,
+            value: rhs,
+            ..
+        } => vec![lhs, rhs],
+        ExprKind::Range { start, end, .. } => start.iter().chain(end).map(|e| &**e).collect(),
+        ExprKind::Break(value) | ExprKind::Return(value) => value.iter().map(|e| &**e).collect(),
+        ExprKind::Lit(_)
+        | ExprKind::Path(_)
+        | ExprKind::Paren(_)
+        | ExprKind::Tuple(_)
+        | ExprKind::Array(_)
+        | ExprKind::Repeat { .. }
+        | ExprKind::Block(_)
+        | ExprKind::If { .. }
+        | ExprKind::Loop(_)
+        | ExprKind::While { .. }
+        | ExprKind::For { .. }
+        | ExprKind::Match { .. }
+        | ExprKind::Continue
+        | ExprKind::Error => Vec::new(),
+    }
+}
+
+/// 括弧の外にブロック様の式を含むか
+pub(crate) fn has_bare_block_like(expr: &Expr) -> bool {
+    matches!(
+        expr.kind,
+        ExprKind::Block(_)
+            | ExprKind::If { .. }
+            | ExprKind::Loop(_)
+            | ExprKind::While { .. }
+            | ExprKind::For { .. }
+            | ExprKind::Match { .. }
+    ) || bare_operands(expr).into_iter().any(has_bare_block_like)
+}
+
+/// `&&` で連ねた最上位のオペランド以外にある `let` の位置。`allowed` が偽の場合は最上位でも使えない
+fn misplaced_lets(expr: &Expr, allowed: bool) -> Vec<Span> {
+    match &expr.kind {
+        ExprKind::Let {
+            expr: scrutinee, ..
+        } if allowed => misplaced_lets(scrutinee, false),
+        ExprKind::Let { .. } => vec![expr.span],
+        ExprKind::Binary {
+            op: BinaryOp::And,
+            lhs,
+            rhs,
+        } => [lhs, rhs]
+            .into_iter()
+            .flat_map(|operand| misplaced_lets(operand, allowed))
+            .collect(),
+        _ => bare_operands(expr)
+            .into_iter()
+            .flat_map(|operand| misplaced_lets(operand, false))
+            .collect(),
+    }
 }
 
 #[cfg(test)]
@@ -169,6 +280,13 @@ mod tests {
     #[case("for i in a.. { b }", "(for i (.. a _) (block b))")]
     #[case("for i in a..b {}", "(for i (.. a b) (block))")]
     #[case("for i in f({ a }) {}", "(for i (call f (block a)) (block))")]
+    #[case("for (a, b) in xs {}", "(for (tuple a b) xs (block))")]
+    #[case("for Some(x) in xs {}", "(for (Some x) xs (block))")]
+    #[case(
+        "for (x in Some(_)) in xs {}",
+        "(for (paren (in x (Some _))) xs (block))"
+    )]
+    #[case("for (A | B) in xs {}", "(for (paren (| A B)) xs (block))")]
     fn loop_expr(#[case] src: &str, #[case] expected: &str) {
         assert_eq!(parse_ok(src), expected);
     }
@@ -190,10 +308,103 @@ mod tests {
     #[case("for { a }")]
     #[case("for i { a }")]
     #[case("for i in { a } { b }")]
-    #[case("for 1 in a {}")]
+    #[case("for x in Some(_) in xs {}")]
+    #[case("for A | B in xs {}")]
     #[case("for i in a")]
     #[case("{ loop {}; }")]
     fn invalid_loop(#[case] src: &str) {
+        assert!(!parse_expr(src).1.is_empty());
+    }
+
+    #[rstest]
+    #[case("match x {}", "(match x)")]
+    #[case("match x { _ => a }", "(match x (=> _ a))")]
+    #[case(
+        "match x { Some(y) => y, None => z, }",
+        "(match x (=> (Some y) y) (=> None z))"
+    )]
+    #[case(
+        "match x { y if y > a => b, _ => c }",
+        "(match x (=> y (if (Gt y a)) b) (=> _ c))"
+    )]
+    #[case(
+        "match x { A | B => {}, _ => { a } }",
+        "(match x (=> (| A B) (block)) (=> _ (block a)))"
+    )]
+    #[case(
+        "match x { _ => if a { b } else { c }, }",
+        "(match x (=> _ (if a (block b) (block c))))"
+    )]
+    #[case("match a + b { _ => c }", "(match (Add a b) (=> _ c))")]
+    #[case("match ({ a }) { _ => b }", "(match (paren (block a)) (=> _ b))")]
+    fn match_expr(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("{ match x { _ => a } b }", "(block (expr (match x (=> _ a))) b)")]
+    #[case("{ match x { _ => a } }", "(block (match x (=> _ a)))")]
+    #[case("a + match x { _ => b }", "(Add a (match x (=> _ b)))")]
+    fn match_in_expr_and_stmt(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("match x")]
+    #[case("match { a } { _ => b }")]
+    #[case("match x { _ }")]
+    #[case("match x { _ => a b }")]
+    #[case("match x { _ => {} _ => b }")]
+    #[case("match x { _ => a,, }")]
+    #[case("match x { if a => b }")]
+    #[case("{ match x { _ => a }; }")]
+    fn invalid_match(#[case] src: &str) {
+        assert!(!parse_expr(src).1.is_empty());
+    }
+
+    #[rstest]
+    #[case("if let Some(x) = a { b }", "(if (let (Some x) a) (block b))")]
+    #[case(
+        "if let Some(x) = a && x > b { c }",
+        "(if (And (let (Some x) a) (Gt x b)) (block c))"
+    )]
+    #[case(
+        "if a && let Some(x) = b { c }",
+        "(if (And a (let (Some x) b)) (block c))"
+    )]
+    #[case(
+        "if let A = a && let B = b && c { d }",
+        "(if (And (And (let A a) (let B b)) c) (block d))"
+    )]
+    #[case("if let A = a == b { c }", "(if (let A (Eq a b)) (block c))")]
+    #[case("if let A = (a || b) { c }", "(if (let A (paren (Or a b))) (block c))")]
+    #[case(
+        "if let A = a { b } else if let B = c { d }",
+        "(if (let A a) (block b) (if (let B c) (block d)))"
+    )]
+    #[case(
+        "while let Some(x) = it.next() { f(x); }",
+        "(while (let (Some x) (method it next)) (block (semi (call f x))))"
+    )]
+    fn let_condition(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("if let A = a || b {}")]
+    #[case("if a || let A = b {}")]
+    #[case("if !let A = a {}")]
+    #[case("if (let A = a) {}")]
+    #[case("if let A = { a } {}")]
+    #[case("if let A = a..b {}")]
+    #[case("if x = let A = a {}")]
+    #[case("if return let A = a {}")]
+    #[case("let A = a")]
+    #[case("a && let A = b")]
+    #[case("match let A = a { _ => b }")]
+    #[case("for x in let A = a {}")]
+    #[case("{ let x = let A = a; }")]
+    fn invalid_let_condition(#[case] src: &str) {
         assert!(!parse_expr(src).1.is_empty());
     }
 }

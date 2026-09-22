@@ -1,4 +1,4 @@
-use crate::ast::{Expr, ExprKind, Pat, PatKind, PathName, Span};
+use crate::ast::{Expr, ExprKind, FieldPat, Pat, PatKind, PathName, Span};
 use crate::control::block_like;
 use crate::error::Error;
 use crate::parser::{Extra, expr, input, lex, path, signed_literal};
@@ -115,7 +115,8 @@ where
         .allow_trailing()
         .collect::<Vec<_>>();
     let parens = pattern
-        .then(just(Token::Comma).ignore_then(items).or_not())
+        .clone()
+        .then(just(Token::Comma).ignore_then(items.clone()).or_not())
         .or_not()
         .delimited_by(just(Token::LParen), just(Token::RParen))
         .map(|inner| match inner {
@@ -123,35 +124,118 @@ where
             Some((first, None)) => PatKind::Paren(Box::new(first)),
             Some((first, Some(rest))) => PatKind::Tuple(once(first).chain(rest).collect()),
         });
-    let binding = path.map(|path| match &path.segments[..] {
-        [segment] if segment.args.is_none() => match &segment.name {
-            PathName::Ident(name) => PatKind::Ident {
-                mutable: false,
-                name: name.clone(),
-                sub: None,
-            },
-            _ => PatKind::Path(path),
-        },
-        _ => PatKind::Path(path),
-    });
+    let slice = items
+        .clone()
+        .delimited_by(just(Token::LBracket), just(Token::RBracket))
+        .map(PatKind::Slice);
 
-    let simple = choice((
-        just(Token::Underscore).to(PatKind::Wild),
-        just(Token::DotDot).to(PatKind::Rest),
-        signed_literal(src).map(PatKind::Lit),
-        parens,
+    let field = choice((
+        ident(src).then_ignore(just(Token::Colon)).then(pattern),
         just(Token::Mut)
-            .ignore_then(ident(src))
-            .map(|name| PatKind::Ident {
-                mutable: true,
-                name,
-                sub: None,
+            .or_not()
+            .then(ident(src))
+            .map_with(|(mutable, name), e| {
+                let kind = PatKind::Ident {
+                    mutable: mutable.is_some(),
+                    name: name.clone(),
+                    sub: None,
+                };
+                (
+                    name,
+                    Pat {
+                        kind,
+                        span: e.span(),
+                    },
+                )
             }),
-        binding,
     ))
-    .map_with(|kind, e| Pat {
-        kind,
+    .map_with(|(name, pat), e| FieldPat {
+        name,
+        pat,
         span: e.span(),
+    });
+    let rest = just(Token::DotDot).then_ignore(just(Token::Comma).or_not());
+    let fields = choice((
+        rest.to((Vec::new(), true)),
+        field
+            .separated_by(just(Token::Comma))
+            .collect::<Vec<_>>()
+            .then(just(Token::Comma).ignore_then(rest.or_not()).or_not())
+            .map(|(fields, tail)| (fields, matches!(tail, Some(Some(_))))),
+    ))
+    .delimited_by(just(Token::LBrace), just(Token::RBrace));
+
+    enum Suffix {
+        Tuple(Vec<Pat>),
+        Struct(Vec<FieldPat>, bool),
+    }
+    let path_pat = path
+        .then(
+            choice((
+                items
+                    .delimited_by(just(Token::LParen), just(Token::RParen))
+                    .map(Suffix::Tuple),
+                fields.map(|(fields, rest)| Suffix::Struct(fields, rest)),
+            ))
+            .or_not(),
+        )
+        .map(|(path, suffix)| match (suffix, &path.segments[..]) {
+            (Some(Suffix::Tuple(elems)), _) => PatKind::TupleStruct { path, elems },
+            (Some(Suffix::Struct(fields, rest)), _) => PatKind::Struct { path, fields, rest },
+            (None, [segment]) if segment.args.is_none() => match &segment.name {
+                PathName::Ident(name) => PatKind::Ident {
+                    mutable: false,
+                    name: name.clone(),
+                    sub: None,
+                },
+                _ => PatKind::Path(path),
+            },
+            (None, _) => PatKind::Path(path),
+        });
+
+    let error = |span| Pat {
+        kind: PatKind::Error,
+        span,
+    };
+    let simple = recursive(|simple| {
+        choice((
+            just(Token::Underscore).to(PatKind::Wild),
+            just(Token::DotDot).to(PatKind::Rest),
+            signed_literal(src).map(PatKind::Lit),
+            just(Token::Amp)
+                .ignore_then(just(Token::Mut).or_not().map(|m| m.is_some()))
+                .then(simple)
+                .map(|(mutable, pat)| PatKind::Ref {
+                    mutable,
+                    pat: Box::new(pat),
+                }),
+            parens,
+            slice,
+            just(Token::Mut)
+                .ignore_then(ident(src))
+                .map(|name| PatKind::Ident {
+                    mutable: true,
+                    name,
+                    sub: None,
+                }),
+            path_pat,
+        ))
+        .map_with(|kind, e| Pat {
+            kind,
+            span: e.span(),
+        })
+        .recover_with(via_parser(nested_delimiters(
+            Token::LParen,
+            Token::RParen,
+            [(Token::LBracket, Token::RBracket)],
+            error,
+        )))
+        .recover_with(via_parser(nested_delimiters(
+            Token::LBracket,
+            Token::RBracket,
+            [(Token::LParen, Token::RParen)],
+            error,
+        )))
     });
     range
         .map_with(|kind, e| Pat {
@@ -217,10 +301,16 @@ mod tests {
     }
 
     #[rstest]
+    #[case("&x", "(& x)")]
+    #[case("&mut x", "(&mut x)")]
+    #[case("& &x", "(& (& x))")]
+    #[case("&(x in 'a'..='z')", "(& (paren (in x (..= Char('a') Char('z')))))")]
     #[case("()", "(tuple)")]
     #[case("(x)", "(paren x)")]
     #[case("(x,)", "(tuple x)")]
     #[case("(x, .., y)", "(tuple x .. y)")]
+    #[case("[]", "(slice)")]
+    #[case("[x, rest in .., y]", "(slice x (in rest ..) y)")]
     #[case("a | b | c", "(| a b c)")]
     #[case("(a | b, c)", "(tuple (| a b) c)")]
     fn compound_pattern(#[case] src: &str, #[case] expected: &str) {
@@ -228,6 +318,9 @@ mod tests {
     }
 
     #[rstest]
+    #[case("&&x")]
+    #[case("&'a'..='z'")]
+    #[case("&x in _")]
     #[case("..=")]
     #[case("'a'..=")]
     #[case("mut")]
@@ -249,5 +342,65 @@ mod tests {
         };
         let spans: Vec<_> = pats.iter().map(|p| p.span.into_range()).collect();
         assert_eq!(spans, [1..2, 4..10]);
+    }
+
+    #[test]
+    fn recovers_inside_delimiters() {
+        let (pat, errors) = parse_pattern("[(a b), c]");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(pat.unwrap().as_sexpr(), "(slice error c)");
+    }
+
+    #[rstest]
+    #[case("None", "None")]
+    #[case("Option::None", "Option::None")]
+    #[case("Some(x)", "(Some x)")]
+    #[case("Unit()", "(Unit)")]
+    #[case("Point(x, .., y)", "(Point x .. y)")]
+    #[case("Option::<T>::Some(_)", "(Option<T>::Some _)")]
+    #[case("Some(x) | None", "(| (Some x) None)")]
+    fn tuple_struct_pattern(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("P {}", "(struct P)")]
+    #[case("P { .. }", "(struct P ..)")]
+    #[case("P { x }", "(struct P (x x))")]
+    #[case("P { x, .. }", "(struct P (x x) ..)")]
+    #[case("P { x, .., }", "(struct P (x x) ..)")]
+    #[case("P { x, mut y }", "(struct P (x x) (y (mut y)))")]
+    #[case("P { x: Some(y), }", "(struct P (x (Some y)))")]
+    #[case("m::P { x: 'a'..='z' }", "(struct m::P (x (..= Char('a') Char('z'))))")]
+    fn struct_pattern(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("Some(x")]
+    #[case("P { x .. }")]
+    #[case("P { .., x }")]
+    #[case("P { x: }")]
+    #[case("P { mut x: y }")]
+    #[case("P { 0: x }")]
+    #[case("P { x, y")]
+    fn invalid_struct_pattern(#[case] src: &str) {
+        assert!(!parse_pattern(src).1.is_empty());
+    }
+
+    #[test]
+    fn field_pattern_spans() {
+        let pat = parse_pattern("P { x, y: _ }").0.unwrap();
+        let PatKind::Struct { fields, .. } = pat.kind else {
+            panic!("{pat:?}");
+        };
+        let spans: Vec<_> = fields.iter().map(|f| f.span.into_range()).collect();
+        assert_eq!(spans, [4..5, 7..11]);
+    }
+
+    #[test]
+    fn deeply_nested_struct_patterns() {
+        let src = format!("{}_{}", "P { x: ".repeat(32), " }".repeat(32));
+        assert!(parse_pattern(&src).1.is_empty());
     }
 }
