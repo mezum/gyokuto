@@ -5,14 +5,19 @@ on:
     branches: [main]
   pull_request:
 
+permissions: {}
+
 jobs:
   ci:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - run: rustup toolchain install
       - uses: actions/cache@v6
         with:
@@ -31,11 +36,36 @@ jobs:
         run: |
           perl .github/scripts/test-times.pl ci.log > test-times.md
           { echo '## テスト時間'; cat test-times.md; } >> "$GITHUB_STEP_SUMMARY"
-      - name: テスト時間の概要を PR にコメントする
+      - id: upload
         if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-times
+          path: test-times.md
+          retention-days: 1
+
+  comment:
+    needs: ci
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      pull-requests: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: test-times
+      - name: テスト時間の概要を PR にコメントする
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           { echo '## テスト時間'; head -1 test-times.md; echo; echo "詳細: $RUN_URL"; } > comment.md
-          gh pr comment ${{ github.event.pull_request.number }} --edit-last --create-if-none --body-file comment.md
+          gh pr comment "$PR" --edit-last --create-if-none --body-file comment.md
+      - name: artifact を削除する
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ needs.ci.outputs.artifact-id }}
+        run: gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID"
