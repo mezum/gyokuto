@@ -15,16 +15,24 @@ pub enum LexError {
     #[error("invalid suffix on the number literal")]
     InvalidNumberSuffix,
 
-    #[error("invalid character literal")]
-    InvalidCharLiteral,
-    #[error("invalid string literal")]
-    InvalidStringLiteral,
-    #[error("invalid byte literal")]
-    InvalidByteLiteral,
-    #[error("invalid byte string literal")]
-    InvalidByteStringLiteral,
+    #[error("unterminated character literal")]
+    UnterminatedCharLiteral,
+    #[error("unterminated string literal")]
+    UnterminatedStringLiteral,
+    #[error("empty character literal")]
+    EmptyCharLiteral,
+    #[error("character literal may only contain one character")]
+    TooManyCharsInCharLiteral,
+    #[error("character must be escaped in the character literal")]
+    UnescapedCharInCharLiteral,
+    #[error("invalid escape sequence")]
+    InvalidEscape,
     #[error("invalid unicode escape")]
     InvalidUnicodeEscape,
+    #[error("unicode escape in the byte literal")]
+    UnicodeEscapeInByteLiteral,
+    #[error("non-ASCII character in the byte literal")]
+    NonAsciiInByteLiteral,
 
     #[error("unterminated raw string literal")]
     UnterminatedRawString,
