@@ -1,5 +1,5 @@
 use crate::ast::{BinaryOp, Expr, ExprKind, Field, Lit, Path, PathSegment, Span, UnaryOp};
-use crate::error::Error;
+use crate::error::{Error, ErrorKind};
 use crate::literal;
 use chumsky::pratt::{Associativity, Operator, infix, left, none, postfix, prefix};
 use chumsky::{input::ValueInput, prelude::*};
@@ -158,6 +158,8 @@ where
             Call(Vec<Expr>),
             Method(String, Vec<Expr>),
             Field(Field),
+            /// `t.0.1` のようにまとめて字句解析されたタプルのフィールドと、各フィールドの終端の位置
+            TupleFields(Vec<(usize, usize)>),
             Index(Expr),
             Try,
         }
@@ -181,30 +183,52 @@ where
                 just(Token::Dot)
                     .ignore_then(ident)
                     .map(|name| PostfixOp::Field(Field::Named(name))),
+                just(Token::Dot)
+                    .ignore_then(one_of([Token::Int, Token::Float]))
+                    .to_span()
+                    .validate(move |span: Span, _, emitter| {
+                        let index = span.start + 1;
+                        tuple_indices(&src[index..span.end], index).unwrap_or_else(|| {
+                            emitter.emit(Error {
+                                span: Span::from(index..span.end),
+                                kind: ErrorKind::InvalidTupleIndex,
+                            });
+                            Vec::new()
+                        })
+                    })
+                    .map(PostfixOp::TupleFields),
                 expr.clone()
                     .delimited_by(just(Token::LBracket), just(Token::RBracket))
                     .map(PostfixOp::Index),
                 just(Token::Question).to(PostfixOp::Try),
             )),
-            |lhs, op, e| {
+            |lhs: Expr, op, e| {
+                let start = lhs.span.start;
+                let span = e.span();
+                let wrap = |kind| Expr { kind, span };
                 let lhs = Box::new(lhs);
-                let kind = match op {
-                    PostfixOp::Call(args) => ExprKind::Call { callee: lhs, args },
-                    PostfixOp::Method(method, args) => ExprKind::MethodCall {
+                match op {
+                    PostfixOp::Call(args) => wrap(ExprKind::Call { callee: lhs, args }),
+                    PostfixOp::Method(method, args) => wrap(ExprKind::MethodCall {
                         receiver: lhs,
                         method,
                         args,
-                    },
-                    PostfixOp::Field(field) => ExprKind::Field { expr: lhs, field },
-                    PostfixOp::Index(index) => ExprKind::Index {
+                    }),
+                    PostfixOp::Field(field) => wrap(ExprKind::Field { expr: lhs, field }),
+                    PostfixOp::TupleFields(fields) => {
+                        fields.into_iter().fold(*lhs, |expr, (index, end)| Expr {
+                            kind: ExprKind::Field {
+                                expr: Box::new(expr),
+                                field: Field::Index(index),
+                            },
+                            span: Span::from(start..end),
+                        })
+                    }
+                    PostfixOp::Index(index) => wrap(ExprKind::Index {
                         expr: lhs,
                         index: Box::new(index),
-                    },
-                    PostfixOp::Try => ExprKind::Try(lhs),
-                };
-                Expr {
-                    kind,
-                    span: e.span(),
+                    }),
+                    PostfixOp::Try => wrap(ExprKind::Try(lhs)),
                 }
             },
         );
@@ -325,6 +349,25 @@ where
                 },
             })
     })
+}
+
+/// タプルのフィールドの並び `0` / `0.1` を、各フィールドの値と終端の位置に分ける
+///
+/// フィールドは `_`・サフィックス・先頭の `0` などを含まない 10 進数に限る
+fn tuple_indices(text: &str, offset: usize) -> Option<Vec<(usize, usize)>> {
+    text.split('.')
+        .scan(offset, |start, digits| {
+            let end = *start + digits.len();
+            *start = end + 1;
+            Some((digits, end))
+        })
+        .map(|(digits, end)| {
+            let decimal = digits.bytes().all(|b| b.is_ascii_digit());
+            let canonical = digits == "0" || !digits.starts_with('0');
+            let index = digits.parse().ok().filter(|_| decimal && canonical)?;
+            Some((index, end))
+        })
+        .collect()
 }
 
 /// 分割された `>` で始まるトークンが、隙間なく `tokens` の通りに並んでいるものを 1 つの演算子として解析する
