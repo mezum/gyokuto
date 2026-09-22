@@ -126,4 +126,44 @@ mod tests {
     fn invalid_if(#[case] src: &str) {
         assert!(!parse_expr(src).1.is_empty());
     }
+
+    #[rstest]
+    #[case("loop {}", "(loop (block))")]
+    #[case("loop { break a }", "(loop (block (break a)))")]
+    #[case(
+        "while a < b { a += c; }",
+        "(while (Lt a b) (block (semi (Add= a c))))"
+    )]
+    #[case("while ({ a }) {}", "(while (paren (block a)) (block))")]
+    #[case("for i in xs { f(i); }", "(for i xs (block (semi (call f i))))")]
+    #[case("for i in a.. { b }", "(for i (.. a _) (block b))")]
+    #[case("for i in a..b {}", "(for i (.. a b) (block))")]
+    #[case("for i in f({ a }) {}", "(for i (call f (block a)) (block))")]
+    fn loop_expr(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("{ loop {} a }", "(block (expr (loop (block))) a)")]
+    #[case("{ while a {} -b }", "(block (expr (while a (block))) (Neg b))")]
+    #[case("{ for i in a {} }", "(block (for i a (block)))")]
+    #[case("a + loop { break b }", "(Add a (loop (block (break b))))")]
+    fn loop_in_expr_and_stmt(#[case] src: &str, #[case] expected: &str) {
+        assert_eq!(parse_ok(src), expected);
+    }
+
+    #[rstest]
+    #[case("loop")]
+    #[case("loop a")]
+    #[case("while { a } { b }")]
+    #[case("while a")]
+    #[case("for { a }")]
+    #[case("for i { a }")]
+    #[case("for i in { a } { b }")]
+    #[case("for 1 in a {}")]
+    #[case("for i in a")]
+    #[case("{ loop {}; }")]
+    fn invalid_loop(#[case] src: &str) {
+        assert!(!parse_expr(src).1.is_empty());
+    }
 }
