@@ -11,6 +11,17 @@ type Extra = extra::Err<Error>;
 
 /// 式を解析する
 pub fn parse_expr(src: &str) -> (Option<Expr>, Vec<Error>) {
+    let (tokens, mut errors) = lex(src);
+    let (expr, parse_errors) = expr(src)
+        .then_ignore(end())
+        .parse(input(&tokens, src))
+        .into_output_errors();
+    errors.extend(parse_errors);
+    (expr, errors)
+}
+
+/// 字句解析し、エラーのトークンを `Token::Error` に置き換えたトークン列と字句解析のエラーを得る
+pub(crate) fn lex(src: &str) -> (Vec<(Token, Span)>, Vec<Error>) {
     let lexed: Vec<_> = Token::lexer(src)
         .spanned()
         .map(|(token, span)| (token, Span::from(span)))
@@ -19,18 +30,25 @@ pub fn parse_expr(src: &str) -> (Option<Expr>, Vec<Error>) {
         .iter()
         .map(|&(token, span)| (token.unwrap_or(Token::Error), span))
         .collect();
-    let lex_errors = lexed.iter().filter_map(|&(token, span)| {
-        token.err().map(|error| Error {
-            span,
-            kind: error.into(),
+    let errors = lexed
+        .iter()
+        .filter_map(|&(token, span)| {
+            token.err().map(|error| Error {
+                span,
+                kind: error.into(),
+            })
         })
-    });
+        .collect();
+    (tokens, errors)
+}
+
+/// トークン列を chumsky の入力にする
+pub(crate) fn input<'tok>(
+    tokens: &'tok [(Token, Span)],
+    src: &str,
+) -> impl ValueInput<'tok, Token = Token, Span = Span> {
     let eoi = Span::from(src.len()..src.len());
-    let (expr, parse_errors) = expr(src)
-        .then_ignore(end())
-        .parse(tokens.as_slice().map(eoi, |(token, span)| (token, span)))
-        .into_output_errors();
-    (expr, lex_errors.chain(parse_errors).collect())
+    tokens.map(eoi, |(token, span)| (token, span))
 }
 
 fn expr<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, Expr, Extra> + Clone
@@ -38,33 +56,6 @@ where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
     recursive(|expr| {
-        let bool_lit = select! {
-            Token::True => ExprKind::Lit(Lit::Bool(true)),
-            Token::False => ExprKind::Lit(Lit::Bool(false)),
-        };
-        let lit = one_of([
-            Token::Int,
-            Token::Float,
-            Token::Char,
-            Token::Byte,
-            Token::Str,
-            Token::ByteStr,
-            Token::RawStr,
-            Token::RawByteStr,
-        ])
-        .validate(move |token, e, emitter| {
-            let span: Span = e.span();
-            literal::decode(token, &src[span.into_range()])
-                .map(ExprKind::Lit)
-                .unwrap_or_else(|error| {
-                    emitter.emit(Error {
-                        span,
-                        kind: error.into(),
-                    });
-                    ExprKind::Error
-                })
-        });
-
         let rest_items = just(Token::Comma).ignore_then(
             expr.clone()
                 .separated_by(just(Token::Comma))
@@ -114,9 +105,12 @@ where
             span,
         };
         let atom = choice((
-            bool_lit,
-            lit,
-            path(src).map(ExprKind::Path),
+            literal(src),
+            path(src, empty()).map(|segments| {
+                ExprKind::Path(Path {
+                    segments: segments.into_iter().map(|(segment, ())| segment).collect(),
+                })
+            }),
             parens,
             array,
             just(Token::Error).to(ExprKind::Error),
@@ -279,7 +273,47 @@ where
     })
 }
 
-fn path<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, Path, Extra> + Clone
+/// 真偽値とリテラルのトークンを解析し、値に変換する
+pub(crate) fn literal<'tok, 'src: 'tok, I>(
+    src: &'src str,
+) -> impl Parser<'tok, I, ExprKind, Extra> + Clone
+where
+    I: ValueInput<'tok, Token = Token, Span = Span>,
+{
+    let bool_lit = select! {
+        Token::True => ExprKind::Lit(Lit::Bool(true)),
+        Token::False => ExprKind::Lit(Lit::Bool(false)),
+    };
+    let lit = one_of([
+        Token::Int,
+        Token::Float,
+        Token::Char,
+        Token::Byte,
+        Token::Str,
+        Token::ByteStr,
+        Token::RawStr,
+        Token::RawByteStr,
+    ])
+    .validate(move |token, e, emitter| {
+        let span: Span = e.span();
+        literal::decode(token, &src[span.into_range()])
+            .map(ExprKind::Lit)
+            .unwrap_or_else(|error| {
+                emitter.emit(Error {
+                    span,
+                    kind: error.into(),
+                });
+                ExprKind::Error
+            })
+    });
+    choice((bool_lit, lit))
+}
+
+/// パスを解析する。各セグメントの後には `args` を続けて解析する
+pub(crate) fn path<'tok, 'src: 'tok, I, O>(
+    src: &'src str,
+    args: impl Parser<'tok, I, O, Extra> + Clone,
+) -> impl Parser<'tok, I, Vec<(PathSegment, O)>, Extra> + Clone
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
@@ -287,23 +321,28 @@ where
         .to_span()
         .map(move |span: Span| PathSegment::Ident(src[span.into_range()].to_string()));
     let head = choice((
-        just(Token::Crate).to(vec![PathSegment::Crate]),
-        just(Token::SelfValue).to(vec![PathSegment::SelfValue]),
-        just(Token::SelfType).to(vec![PathSegment::SelfType]),
         just(Token::Super)
             .to(PathSegment::Super)
+            .then(args.clone())
             .separated_by(just(Token::ColonColon))
             .at_least(1)
             .collect(),
-        ident.map(|segment| vec![segment]),
+        choice((
+            just(Token::Crate).to(PathSegment::Crate),
+            just(Token::SelfValue).to(PathSegment::SelfValue),
+            just(Token::SelfType).to(PathSegment::SelfType),
+            ident,
+        ))
+        .then(args.clone())
+        .map(|segment| vec![segment]),
     ));
     let rest = just(Token::ColonColon)
-        .ignore_then(ident)
+        .ignore_then(ident.then(args))
         .repeated()
         .collect::<Vec<_>>();
     head.then(rest).map(|(mut segments, rest)| {
         segments.extend(rest);
-        Path { segments }
+        segments
     })
 }
 
