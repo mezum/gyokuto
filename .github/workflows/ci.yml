@@ -8,6 +8,9 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v7
       - run: rustup toolchain install
@@ -22,4 +25,17 @@ jobs:
       - uses: taiki-e/install-action@dfae9bf3d6f6c6f20ef4ebb3486c01a51341ff12 # v2.87.18
         with:
           tool: just
-      - run: just ci
+      - run: just ci 2>&1 | tee ci.log
+        shell: bash
+      - name: テスト時間を Job Summary に書く
+        run: |
+          perl .github/scripts/test-times.pl ci.log > test-times.md
+          { echo '## テスト時間'; cat test-times.md; } >> "$GITHUB_STEP_SUMMARY"
+      - name: テスト時間の概要を PR にコメントする
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          { echo '## テスト時間'; head -1 test-times.md; echo; echo "詳細: $RUN_URL"; } > comment.md
+          gh pr comment ${{ github.event.pull_request.number }} --edit-last --create-if-none --body-file comment.md
