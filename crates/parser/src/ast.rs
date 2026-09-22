@@ -66,6 +66,15 @@ pub enum TypeKind {
         len: Box<Expr>,
     },
     Slice(Box<Type>),
+    /// `fn(params) -> ret`。`ret` が無い場合はユニット型
+    Fn {
+        params: Vec<Type>,
+        ret: Option<Box<Type>>,
+    },
+    /// `dyn A + B`
+    Dyn(Vec<TypePath>),
+    /// `impl A + B`
+    Impl(Vec<TypePath>),
     /// `!`
     Never,
     /// `_`
@@ -89,6 +98,11 @@ pub struct TypePathSegment {
 pub enum GenericArgs {
     /// `<A, B>`
     Angle(Vec<GenericArg>),
+    /// `Fn(A, B) -> C`
+    Paren {
+        inputs: Vec<Type>,
+        output: Option<Box<Type>>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

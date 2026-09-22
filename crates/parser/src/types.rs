@@ -140,7 +140,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{GenericArg, GenericArgs};
+    use crate::ast::{GenericArg, GenericArgs, TypePath};
     use crate::parser::tests::{show, show_segment};
 
     fn show_type(ty: &Type) -> String {
@@ -149,29 +149,56 @@ mod tests {
             format!("({name}{items})")
         };
         match &ty.kind {
-            TypeKind::Path(path) => path
-                .segments
-                .iter()
-                .map(|s| {
-                    let args = s.args.as_ref().map_or(String::new(), |args| match args {
-                        GenericArgs::Angle(args) => {
-                            let args: Vec<_> = args.iter().map(show_arg).collect();
-                            format!("<{}>", args.join(", "))
-                        }
-                    });
-                    format!("{}{args}", show_segment(&s.segment))
-                })
-                .collect::<Vec<_>>()
-                .join("::"),
+            TypeKind::Path(path) => show_path(path),
             TypeKind::Ref { mutable, ty } => list(if *mutable { "&mut" } else { "&" }, &[ty]),
             TypeKind::Paren(t) => list("paren", &[t]),
             TypeKind::Tuple(ts) => list("tuple", &ts.iter().collect::<Vec<_>>()),
             TypeKind::Array { elem, len } => format!("(array {} {})", show_type(elem), show(len)),
             TypeKind::Slice(t) => list("slice", &[t]),
+            TypeKind::Fn { params, ret } => {
+                let ret = ret
+                    .as_ref()
+                    .map_or(String::new(), |t| format!(" {}", show_type(t)));
+                let params: Vec<_> = params.iter().map(show_type).collect();
+                format!("(fn ({}){ret})", params.join(" "))
+            }
+            TypeKind::Dyn(bounds) => show_bounds("dyn", bounds),
+            TypeKind::Impl(bounds) => show_bounds("impl", bounds),
             TypeKind::Never => "!".to_string(),
             TypeKind::Infer => "_".to_string(),
             TypeKind::Error => "error".to_string(),
         }
+    }
+
+    fn show_path(path: &TypePath) -> String {
+        path.segments
+            .iter()
+            .map(|s| {
+                let args = s.args.as_ref().map_or(String::new(), |args| match args {
+                    GenericArgs::Angle(args) => {
+                        let args: Vec<_> = args.iter().map(show_arg).collect();
+                        format!("<{}>", args.join(", "))
+                    }
+                    GenericArgs::Paren { inputs, output } => {
+                        let inputs: Vec<_> = inputs.iter().map(show_type).collect();
+                        let output = output
+                            .as_ref()
+                            .map_or(String::new(), |t| format!(" -> {}", show_type(t)));
+                        format!("({}){output}", inputs.join(", "))
+                    }
+                });
+                format!("{}{args}", show_segment(&s.segment))
+            })
+            .collect::<Vec<_>>()
+            .join("::")
+    }
+
+    fn show_bounds(name: &str, bounds: &[TypePath]) -> String {
+        let bounds: String = bounds
+            .iter()
+            .map(|b| format!(" {}", show_path(b)))
+            .collect();
+        format!("({name}{bounds})")
     }
 
     fn show_arg(arg: &GenericArg) -> String {
@@ -238,6 +265,54 @@ mod tests {
             parse_ok("[[u8; n]; m + 1]"),
             "(array (array u8 n) (Add m Int { value: 1, suffix: None }))"
         );
+    }
+
+    #[test]
+    fn fn_types() {
+        assert_eq!(parse_ok("fn()"), "(fn ())");
+        assert_eq!(parse_ok("fn(A, B,) -> C"), "(fn (A B) C)");
+        assert_eq!(parse_ok("fn(fn(A)) -> !"), "(fn ((fn (A))) !)");
+    }
+
+    #[test]
+    fn parenthesized_generic_args() {
+        assert_eq!(parse_ok("Fn(A) -> B"), "Fn(A) -> B");
+        assert_eq!(parse_ok("FnMut()"), "FnMut()");
+        assert_eq!(
+            parse_ok("Box<dyn Fn(i32) -> i32>"),
+            "Box<(dyn Fn(i32) -> i32)>"
+        );
+    }
+
+    #[test]
+    fn dyn_and_impl_types() {
+        for (src, expected) in [
+            ("dyn A", "(dyn A)"),
+            ("dyn A + B", "(dyn A B)"),
+            (
+                "impl Iterator<Item = T> + Clone",
+                "(impl Iterator<Item = T> Clone)",
+            ),
+            ("&dyn A", "(& (dyn A))"),
+            ("&(dyn A + B)", "(& (paren (dyn A B)))"),
+            ("dyn Fn() -> A + B", "(dyn Fn() -> A B)"),
+            ("Vec<dyn A + B>", "Vec<(dyn A B)>"),
+        ] {
+            assert_eq!(parse_ok(src), expected, "{src}");
+        }
+    }
+
+    #[test]
+    fn bounds_need_parens_in_ambiguous_positions() {
+        for src in [
+            "&dyn A + B",
+            "fn() -> dyn A + B",
+            "dyn",
+            "dyn A +",
+            "impl &A",
+        ] {
+            assert!(!parse_type(src).1.is_empty(), "{src}");
+        }
     }
 
     #[test]
