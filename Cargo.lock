@@ -81,6 +81,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
+name = "gyokuto-lexer"
+version = "0.1.0"
+dependencies = [
+ "logos",
+ "unicode-ident",
+]
+
+[[package]]
+name = "gyokuto-parser"
+version = "0.1.0"
+dependencies = [
+ "chumsky",
+ "gyokuto-lexer",
+ "logos",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -258,23 +275,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "typed-vm-lexer"
-version = "0.1.0"
-dependencies = [
- "logos",
- "unicode-ident",
-]
-
-[[package]]
-name = "typed-vm-parser"
-version = "0.1.0"
-dependencies = [
- "chumsky",
- "logos",
- "typed-vm-lexer",
 ]
 
 [[package]]
