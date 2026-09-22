@@ -123,4 +123,79 @@ UnaryExpr  ::= ( '-' | '!' | '*' | '&' | '&' 'mut' ) UnaryExpr
   - 右結合のため `a = b = c` は `a = (b = c)` と解析され、型検査で `()` の代入としてエラーとなる
   - 左辺が代入できる場所 (変数・フィールドなど) であるかは型検査で検査する
 
+## 型
+
+```ebnf
+Type         ::= TypeNoBounds | 'dyn' TypeBounds | 'impl' TypeBounds
+TypeNoBounds ::= PathType | RefType | ParenType | TupleType | ArrayType | SliceType
+               | FnType | 'dyn' PathType | 'impl' PathType | '!' | '_'
+TypeBounds   ::= PathType ( '+' PathType )*
+```
+
+- `dyn` / `impl` の後には `+` で複数のトレイトを書ける
+  - 参照の対象や関数型の戻り値など、`+` が曖昧になる位置では括弧で囲む (`&(dyn A + B)`)
+- `!` は値を返さない (発散する) ことを表す never 型とする
+- `_` は型推論に任せる位置を表す (`Vec<_>`)
+  - どこに書けるかは型検査で検査する
+
+### パス型
+
+```ebnf
+PathType        ::= TypePathSegment ( '::' TypePathSegment )*
+TypePathSegment ::= PathSegment GenericArgs?
+GenericArgs     ::= '<' ( GenericArg ( ',' GenericArg )* ','? )? '>'
+                  | '(' ( Type ( ',' Type )* ','? )? ')' ( '->' TypeNoBounds )?
+GenericArg      ::= Type | IDENT '=' Type | ConstArg | 'dyn' BlockExpr
+ConstArg        ::= LiteralExpr | '-' LiteralExpr | BlockExpr
+```
+
+- パスの規則はパス式と同じ
+- 型引数には型・関連型の指定 (`Iterator<Item = T>`)・定数 (const generics) を書ける
+  - 定数はリテラル・負のリテラル・ブロック式 (`Buffer<{ N * 2 }>`) とする
+  - `Buffer<N>` の `N` は構文上は型として解析し、型か定数かは名前解決で決める
+- `dyn` のトレイトの型引数に限り、`dyn` を前置したブロック式で実行時に決まる値や型を書ける (`dyn Store<dyn { t }>`)
+  - 型引数の `dyn` の後が `{` であるかで、`dyn Trait` と区別する
+  - `dyn` のトレイト以外の型引数に書いた場合は型検査でエラーとする
+- `Fn(A, B) -> C` のような括弧の型引数は、クロージャのトレイト `Fn` / `FnMut` / `FnOnce` に使う
+- 型引数を閉じる位置にある `>>` `>=` `>>=` は、先頭の `>` を閉じ括弧とし、残りを次のトークンとして扱う
+  - `Vec<Vec<T>>` は `>` 2 つとして解析する
+
+### 参照型
+
+```ebnf
+RefType ::= '&' 'mut'? TypeNoBounds
+```
+
+- 参照は第二級であり、どこに書けるかは型検査で検査する
+- ライフタイムの注釈は持たない
+- `&&T` は参照の参照となるため書けない
+
+### タプル型・括弧型
+
+```ebnf
+ParenType ::= '(' Type ')'
+TupleType ::= '(' ')'
+            | '(' Type ',' ( Type ( ',' Type )* ','? )? ')'
+```
+
+- `()` はユニット型、`(T,)` は要素 1 つのタプル型、`(T)` は括弧型となる
+
+### 配列型・スライス型
+
+```ebnf
+ArrayType ::= '[' Type ';' Expr ']'
+SliceType ::= '[' Type ']'
+```
+
+- `[T; N]` の `N` は定数として評価できる式とする
+- スライス型は `&[T]` のように参照を通して使う
+
+### 関数型
+
+```ebnf
+FnType ::= 'fn' '(' ( Type ( ',' Type )* ','? )? ')' ( '->' TypeNoBounds )?
+```
+
+- `->` を省略した場合、戻り値の型はユニット型となる
+
 [字句仕様]: ./lexical.md
