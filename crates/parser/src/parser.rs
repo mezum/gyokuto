@@ -1,6 +1,7 @@
 use crate::ast::{Expr, ExprKind, Lit, Path, PathSegment, Span};
 use chumsky::{input::ValueInput, prelude::*};
 use logos::Logos;
+use std::iter::once;
 use typed_vm_lexer::Token;
 
 pub type Error = Rich<'static, Token>;
@@ -32,18 +33,89 @@ fn expr<'tok, 'src: 'tok, I>(src: &'src str) -> impl Parser<'tok, I, Expr, Extra
 where
     I: ValueInput<'tok, Token = Token, Span = Span>,
 {
-    let lit = select! {
-        Token::True => Lit::Bool(true),
-        Token::False => Lit::Bool(false),
-    };
-    choice((
-        lit.map(ExprKind::Lit),
-        path(src).map(ExprKind::Path),
-        just(Token::Error).to(ExprKind::Error),
-    ))
-    .map_with(|kind, e| Expr {
-        kind,
-        span: e.span(),
+    recursive(|expr| {
+        let lit = select! {
+            Token::True => Lit::Bool(true),
+            Token::False => Lit::Bool(false),
+        };
+
+        let rest_items = just(Token::Comma).ignore_then(
+            expr.clone()
+                .separated_by(just(Token::Comma))
+                .allow_trailing()
+                .collect::<Vec<_>>(),
+        );
+
+        let parens = expr
+            .clone()
+            .then(rest_items.clone().or_not())
+            .or_not()
+            .delimited_by(just(Token::LParen), just(Token::RParen))
+            .map(|inner| match inner {
+                None => ExprKind::Tuple(Vec::new()),
+                Some((first, None)) => ExprKind::Paren(Box::new(first)),
+                Some((first, Some(rest))) => ExprKind::Tuple(once(first).chain(rest).collect()),
+            });
+
+        enum ArrayTail {
+            Repeat(Expr),
+            List(Vec<Expr>),
+        }
+        let array = expr
+            .clone()
+            .then(choice((
+                just(Token::Semi)
+                    .ignore_then(expr.clone())
+                    .map(ArrayTail::Repeat),
+                rest_items.map(ArrayTail::List),
+                empty().map(|()| ArrayTail::List(Vec::new())),
+            )))
+            .or_not()
+            .delimited_by(just(Token::LBracket), just(Token::RBracket))
+            .map(|inner| match inner {
+                None => ExprKind::Array(Vec::new()),
+                Some((elem, ArrayTail::Repeat(len))) => ExprKind::Repeat {
+                    elem: Box::new(elem),
+                    len: Box::new(len),
+                },
+                Some((first, ArrayTail::List(rest))) => {
+                    ExprKind::Array(once(first).chain(rest).collect())
+                }
+            });
+
+        let error = |span| Expr {
+            kind: ExprKind::Error,
+            span,
+        };
+        choice((
+            lit.map(ExprKind::Lit),
+            path(src).map(ExprKind::Path),
+            parens,
+            array,
+            just(Token::Error).to(ExprKind::Error),
+        ))
+        .map_with(|kind, e| Expr {
+            kind,
+            span: e.span(),
+        })
+        .recover_with(via_parser(nested_delimiters(
+            Token::LParen,
+            Token::RParen,
+            [
+                (Token::LBracket, Token::RBracket),
+                (Token::LBrace, Token::RBrace),
+            ],
+            error,
+        )))
+        .recover_with(via_parser(nested_delimiters(
+            Token::LBracket,
+            Token::RBracket,
+            [
+                (Token::LParen, Token::RParen),
+                (Token::LBrace, Token::RBrace),
+            ],
+            error,
+        )))
     })
 }
 
