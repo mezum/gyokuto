@@ -5,6 +5,7 @@ mod error;
 mod literal;
 mod parser;
 mod sexpr;
+mod stmt;
 mod types;
 
 pub use error::{Error, ErrorKind, Expected, Found, LiteralError};
