@@ -923,6 +923,13 @@ mod tests {
     }
 
     #[test]
+    fn recovers_inside_struct_expr() {
+        let (expr, errors) = parse_expr("[S { x y }, c]");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(expr.unwrap().as_sexpr(), "(array (struct S) c)");
+    }
+
+    #[test]
     fn deeply_nested_invalid_struct_exprs() {
         let src = format!("{}a b{}", "S { x: ".repeat(32), " }".repeat(32));
         assert!(!parse_expr(&src).1.is_empty());
