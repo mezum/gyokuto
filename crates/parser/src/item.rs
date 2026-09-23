@@ -185,7 +185,16 @@ where
                 .separated_by(just(Token::Comma))
                 .allow_trailing()
                 .collect()
-                .delimited_by(just(Token::LBrace), just(Token::RBrace)),
+                .delimited_by(just(Token::LBrace), just(Token::RBrace))
+                .recover_with(via_parser(nested_delimiters(
+                    Token::LBrace,
+                    Token::RBrace,
+                    [
+                        (Token::LParen, Token::RParen),
+                        (Token::LBracket, Token::RBracket),
+                    ],
+                    |_| Vec::new(),
+                ))),
         )
         .map(|(((name, generics), where_preds), variants)| EnumDef {
             name,
