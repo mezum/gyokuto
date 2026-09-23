@@ -1,10 +1,11 @@
 use crate::ast::{
-    BinaryOp, Expr, ExprKind, Field, GenericArgs, Lit, Path, PathName, PathSegment, Span, UnaryOp,
+    BinaryOp, Expr, ExprKind, Field, FieldInit, GenericArgs, Lit, Path, PathName, PathSegment,
+    Span, UnaryOp,
 };
 use crate::control::block_like;
 use crate::error::{Error, ErrorKind};
 use crate::literal;
-use crate::pattern::pattern;
+use crate::pattern::{ident, pattern};
 use crate::types::{angle_args, ty, ty_no_bounds};
 use chumsky::pratt::{Associativity, Operator, infix, left, none, postfix, prefix};
 use chumsky::{input::ValueInput, prelude::*};
@@ -145,9 +146,49 @@ where
             kind: ExprKind::Error,
             span,
         };
+        let base = just(Token::DotDot).ignore_then(expr.clone());
+        let field = ident(src)
+            .then(just(Token::Colon).ignore_then(expr.clone()).or_not())
+            .map_with(|(name, value), e| FieldInit {
+                expr: value.unwrap_or_else(|| Expr {
+                    kind: ExprKind::Path(Path {
+                        segments: vec![PathSegment {
+                            name: PathName::Ident(name.clone()),
+                            args: None,
+                        }],
+                    }),
+                    span: e.span(),
+                }),
+                name,
+                span: e.span(),
+            });
+        let struct_body = choice((
+            base.clone().map(|base| (Vec::new(), Some(base))),
+            field
+                .separated_by(just(Token::Comma))
+                .collect()
+                .then(just(Token::Comma).ignore_then(base.or_not()).or_not())
+                .map(|(fields, base)| (fields, base.flatten())),
+        ))
+        .delimited_by(just(Token::LBrace), just(Token::RBrace));
+        let path_expr = path(src, turbofish.clone().or_not());
+        let path_or_struct = match allow_block_like {
+            true => path_expr
+                .then(struct_body.or_not())
+                .map(|(path, body)| match body {
+                    None => ExprKind::Path(path),
+                    Some((fields, base)) => ExprKind::Struct {
+                        path,
+                        fields,
+                        base: base.map(Box::new),
+                    },
+                })
+                .boxed(),
+            false => path_expr.map(ExprKind::Path).boxed(),
+        };
         let atom = choice((
             literal(src),
-            path(src, turbofish.clone().or_not()).map(ExprKind::Path),
+            path_or_struct,
             parens,
             array,
             just(Token::Error).to(ExprKind::Error),
@@ -879,6 +920,12 @@ mod tests {
     #[case("{ S { x: a } }", "(block (struct S (: x a)))")]
     fn struct_expr(#[case] src: &str, #[case] expected: &str) {
         assert_eq!(parse_ok(src), expected);
+    }
+
+    #[test]
+    fn deeply_nested_invalid_struct_exprs() {
+        let src = format!("{}a b{}", "S { x: ".repeat(32), " }".repeat(32));
+        assert!(!parse_expr(&src).1.is_empty());
     }
 
     #[rstest]

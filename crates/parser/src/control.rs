@@ -138,6 +138,7 @@ fn bare_operands(expr: &Expr) -> Vec<&Expr> {
         | ExprKind::Tuple(_)
         | ExprKind::Array(_)
         | ExprKind::Repeat { .. }
+        | ExprKind::Struct { .. }
         | ExprKind::Block(_)
         | ExprKind::If { .. }
         | ExprKind::Loop(_)
@@ -149,7 +150,7 @@ fn bare_operands(expr: &Expr) -> Vec<&Expr> {
     }
 }
 
-/// 括弧の外にブロック様の式を含むか
+/// 括弧の外にブロック様の式か構造体式を含むか
 pub(crate) fn has_bare_block_like(expr: &Expr) -> bool {
     matches!(
         expr.kind,
@@ -159,6 +160,7 @@ pub(crate) fn has_bare_block_like(expr: &Expr) -> bool {
             | ExprKind::While { .. }
             | ExprKind::For { .. }
             | ExprKind::Match { .. }
+            | ExprKind::Struct { .. }
     ) || bare_operands(expr).into_iter().any(has_bare_block_like)
 }
 

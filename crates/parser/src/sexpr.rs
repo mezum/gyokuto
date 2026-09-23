@@ -38,6 +38,16 @@ impl AsSexpr for Expr {
             ExprKind::Paren(e) => list("paren", [e.as_sexpr()]),
             ExprKind::Tuple(es) => list("tuple", sexprs(es)),
             ExprKind::Array(es) => list("array", sexprs(es)),
+            ExprKind::Struct { path, fields, base } => list(
+                "struct",
+                once(path.as_sexpr())
+                    .chain(
+                        fields
+                            .iter()
+                            .map(|f| list(":", [f.name.clone(), f.expr.as_sexpr()])),
+                    )
+                    .chain(base.as_ref().map(|base| list("..", [base.as_sexpr()]))),
+            ),
             ExprKind::Repeat { elem, len } => list("repeat", sexprs([elem, len])),
             ExprKind::Call { callee, args } => {
                 list("call", once(callee.as_sexpr()).chain(sexprs(args)))
