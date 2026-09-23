@@ -172,10 +172,13 @@ where
         rest.to((Vec::new(), true)),
         field
             .separated_by(just(Token::Comma))
+            .at_least(1)
             .collect::<Vec<_>>()
             .then(just(Token::Comma).ignore_then(rest.or_not()).or_not())
             .map(|(fields, tail)| (fields, matches!(tail, Some(Some(_))))),
     ))
+    .or_not()
+    .map(Option::unwrap_or_default)
     .delimited_by(just(Token::LBrace), just(Token::RBrace));
 
     enum Suffix {
@@ -399,6 +402,8 @@ mod tests {
     #[case("P { mut x: y }")]
     #[case("P { 0: x }")]
     #[case("P { x, y")]
+    #[case("P { , }")]
+    #[case("P { , .. }")]
     fn invalid_struct_pattern(#[case] src: &str) {
         assert!(!parse_pattern(src).1.is_empty());
     }

@@ -185,7 +185,16 @@ where
                 .separated_by(just(Token::Comma))
                 .allow_trailing()
                 .collect()
-                .delimited_by(just(Token::LBrace), just(Token::RBrace)),
+                .delimited_by(just(Token::LBrace), just(Token::RBrace))
+                .recover_with(via_parser(nested_delimiters(
+                    Token::LBrace,
+                    Token::RBrace,
+                    [
+                        (Token::LParen, Token::RParen),
+                        (Token::LBracket, Token::RBracket),
+                    ],
+                    |_| Vec::new(),
+                ))),
         )
         .map(|(((name, generics), where_preds), variants)| EnumDef {
             name,
@@ -398,6 +407,14 @@ mod tests {
     #[case(
         "extern fn f(x); extern fn g();",
         "(extern fn f (params)) (extern fn g (params))"
+    )]
+    #[case(
+        "enum E { A = } fn f() {}",
+        "(enum E (variants)) (fn f (params) (block))"
+    )]
+    #[case(
+        "struct P { x } fn f() {}",
+        "(struct P (fields)) (fn f (params) (block))"
     )]
     fn recovers_inside_delimiters(#[case] src: &str, #[case] expected: &str) {
         let (items, errors) = parse_module(src);

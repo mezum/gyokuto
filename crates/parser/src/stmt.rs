@@ -172,6 +172,10 @@ mod tests {
         "{ let Some(x) = f({ a }) else { return }; }",
         "(block (let (Some x) (= (call f (block a))) (else (block (return)))))"
     )]
+    #[case(
+        "{ let x = (S { a }) else { return }; }",
+        "(block (let x (= (paren (struct S (: a a)))) (else (block (return)))))"
+    )]
     fn let_else(#[case] src: &str, #[case] expected: &str) {
         assert_eq!(parse_ok(src), expected);
     }
@@ -185,6 +189,7 @@ mod tests {
     #[case("{ let x else { return }; }")]
     #[case("{ let x = a else b; }")]
     #[case("{ let x = a else { return } }")]
+    #[case("{ let x = S { a } else { return }; }")]
     fn invalid_let_else(#[case] src: &str) {
         assert!(!parse_expr(src).1.is_empty());
     }

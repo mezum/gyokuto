@@ -15,6 +15,12 @@ pub enum ExprKind {
     Paren(Box<Expr>),
     Tuple(Vec<Expr>),
     Array(Vec<Expr>),
+    /// `P { x: a, y, ..base }`
+    Struct {
+        path: Path,
+        fields: Vec<FieldInit>,
+        base: Option<Box<Expr>>,
+    },
     /// `[elem; len]`
     Repeat {
         elem: Box<Expr>,
@@ -99,6 +105,14 @@ pub enum ExprKind {
     Return(Option<Box<Expr>>),
     /// 構文エラーから回復した箇所
     Error,
+}
+
+/// 構造体式のフィールド。`x` は `x: x` として保持する
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldInit {
+    pub name: String,
+    pub expr: Expr,
+    pub span: Span,
 }
 
 /// `pat if guard => body`
