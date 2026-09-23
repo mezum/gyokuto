@@ -166,10 +166,13 @@ where
             base.clone().map(|base| (Vec::new(), Some(base))),
             field
                 .separated_by(just(Token::Comma))
+                .at_least(1)
                 .collect()
                 .then(just(Token::Comma).ignore_then(base.or_not()).or_not())
                 .map(|(fields, base)| (fields, base.flatten())),
         ))
+        .or_not()
+        .map(Option::unwrap_or_default)
         .delimited_by(just(Token::LBrace), just(Token::RBrace))
         .recover_with(via_parser(nested_delimiters(
             Token::LBrace,
