@@ -3,7 +3,7 @@
 use crate::ast::{
     Arm, Block, Expr, ExprKind, Field, Fields, FnSig, GenericArg, GenericArgs, GenericParam, Item,
     ItemKind, Lit, Pat, PatKind, Path, SelfParam, Stmt, StmtKind, StructDef, Type, TypeKind,
-    WherePred,
+    Variant, WherePred,
 };
 use std::iter::once;
 
@@ -115,6 +115,13 @@ impl AsSexpr for Item {
             ItemKind::ExternFn(sig) => list("extern fn", fn_sig(sig)),
             ItemKind::Struct(def) => list("struct", struct_def(def)),
             ItemKind::ExternStruct(def) => list("extern struct", struct_def(def)),
+            ItemKind::Enum(def) => list(
+                "enum",
+                once(def.name.clone())
+                    .chain(generics(&def.generics))
+                    .chain(where_preds(&def.where_preds))
+                    .chain(once(list("variants", def.variants.iter().map(variant)))),
+            ),
         }
     }
 }
@@ -140,7 +147,15 @@ fn fn_sig(sig: &FnSig) -> Vec<String> {
 }
 
 fn struct_def(def: &StructDef) -> Vec<String> {
-    let fields = match &def.fields {
+    once(def.name.clone())
+        .chain(generics(&def.generics))
+        .chain(where_preds(&def.where_preds))
+        .chain(fields(&def.fields))
+        .collect()
+}
+
+fn fields(fields: &Fields) -> Option<String> {
+    match fields {
         Fields::Named(fields) => Some(list(
             "fields",
             fields
@@ -149,12 +164,15 @@ fn struct_def(def: &StructDef) -> Vec<String> {
         )),
         Fields::Tuple(tys) => Some(list("tuple", sexprs(tys))),
         Fields::Unit => None,
-    };
-    once(def.name.clone())
-        .chain(generics(&def.generics))
-        .chain(where_preds(&def.where_preds))
-        .chain(fields)
-        .collect()
+    }
+}
+
+fn variant(variant: &Variant) -> String {
+    match (fields(&variant.fields), &variant.discriminant) {
+        (Some(fields), _) => list(&variant.name, [fields]),
+        (None, Some(expr)) => list("=", [variant.name.clone(), expr.as_sexpr()]),
+        (None, None) => variant.name.clone(),
+    }
 }
 
 fn non_empty(name: &str, items: Vec<String>) -> Option<String> {

@@ -156,6 +156,23 @@ pub enum ItemKind {
     Struct(StructDef),
     /// `extern struct ..`
     ExternStruct(StructDef),
+    Enum(EnumDef),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumDef {
+    pub name: String,
+    pub generics: Vec<GenericParam>,
+    pub where_preds: Vec<WherePred>,
+    pub variants: Vec<Variant>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Variant {
+    pub name: String,
+    pub fields: Fields,
+    /// `A = 1` の判別子の値
+    pub discriminant: Option<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
