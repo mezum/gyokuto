@@ -153,6 +153,32 @@ pub enum ItemKind {
     },
     /// `extern fn f(..);`
     ExternFn(FnSig),
+    Struct(StructDef),
+    /// `extern struct ..`
+    ExternStruct(StructDef),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructDef {
+    pub name: String,
+    pub generics: Vec<GenericParam>,
+    pub where_preds: Vec<WherePred>,
+    pub fields: Fields,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Fields {
+    /// `{ x: A, y: B }`
+    Named(Vec<FieldDef>),
+    /// `(A, B)`
+    Tuple(Vec<Type>),
+    Unit,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldDef {
+    pub name: String,
+    pub ty: Type,
 }
 
 #[derive(Debug, Clone, PartialEq)]
