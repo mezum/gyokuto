@@ -170,7 +170,16 @@ where
                 .then(just(Token::Comma).ignore_then(base.or_not()).or_not())
                 .map(|(fields, base)| (fields, base.flatten())),
         ))
-        .delimited_by(just(Token::LBrace), just(Token::RBrace));
+        .delimited_by(just(Token::LBrace), just(Token::RBrace))
+        .recover_with(via_parser(nested_delimiters(
+            Token::LBrace,
+            Token::RBrace,
+            [
+                (Token::LParen, Token::RParen),
+                (Token::LBracket, Token::RBracket),
+            ],
+            |_| (Vec::new(), None),
+        )));
         let path_expr = path(src, turbofish.clone().or_not());
         let path_or_struct = match allow_block_like {
             true => path_expr
