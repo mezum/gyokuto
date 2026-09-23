@@ -399,6 +399,14 @@ mod tests {
         "extern fn f(x); extern fn g();",
         "(extern fn f (params)) (extern fn g (params))"
     )]
+    #[case(
+        "enum E { A = } fn f() {}",
+        "(enum E (variants)) (fn f (params) (block))"
+    )]
+    #[case(
+        "struct P { x } fn f() {}",
+        "(struct P (fields)) (fn f (params) (block))"
+    )]
     fn recovers_inside_delimiters(#[case] src: &str, #[case] expected: &str) {
         let (items, errors) = parse_module(src);
         assert_eq!(errors.len(), 1, "{errors:?}");
