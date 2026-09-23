@@ -399,6 +399,8 @@ mod tests {
     #[case("P { mut x: y }")]
     #[case("P { 0: x }")]
     #[case("P { x, y")]
+    #[case("P { , }")]
+    #[case("P { , .. }")]
     fn invalid_struct_pattern(#[case] src: &str) {
         assert!(!parse_pattern(src).1.is_empty());
     }
