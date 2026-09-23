@@ -951,6 +951,8 @@ mod tests {
     #[case("S { ..b, }")]
     #[case("S { ..b, x }")]
     #[case("S { x ..b }")]
+    #[case("S { , }")]
+    #[case("S { , ..b }")]
     fn invalid_struct_expr(#[case] src: &str) {
         assert!(!parse_expr(src).1.is_empty());
     }
